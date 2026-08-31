@@ -1,0 +1,67 @@
+# ===== 构建产物 =====
+build/
+build-*/
+*.o
+*.obj
+*.a
+*.so
+*.so.*
+*.dylib
+*.exe
+*.dll
+*.out
+
+# ===== Qt 自动生成文件 =====
+moc_*.cpp
+moc_*.h
+qrc_*.cpp
+ui_*.h
+*.moc
+moc_predefs.h
+.qmake.stash
+.qmlc/
+.jsc/
+CMakeFiles/
+
+# ===== CMake =====
+CMakeCache.txt
+CMakeLists.txt.user
+cmake_install.cmake
+Makefile
+CTestTestfile.cmake
+Testing/
+*.cmake.in
+
+# ===== 运行时数据 / 数据库 =====
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+*.log
+
+# ===== Python（机器学习可选端点）=====
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# ===== Node / 前端（如大屏引入本地包）=====
+node_modules/
+package-lock.json
+screen/vendor/
+
+# ===== IDE / 编辑器 =====
+.vscode/
+.idea/
+*.user
+*.autosave
+*.swp
+*.swo
+*~
+
+# ===== 系统文件 =====
+.DS_Store
+Thumbs.db
+Desktop.ini
