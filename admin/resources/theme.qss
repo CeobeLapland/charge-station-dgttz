@@ -1,0 +1,219 @@
+/* 服务器管理端 · 深色主题 */
+* {
+    font-family: "Noto Sans CJK SC", "WenQuanYi Micro Hei", "Microsoft YaHei", sans-serif;
+    font-size: 14px;
+    color: #d7dde4;
+}
+
+QWidget {
+    background-color: #141a21;
+}
+
+QMainWindow, QDialog {
+    background-color: #141a21;
+}
+
+/* ---- 顶部栏 / 状态栏 ---- */
+#topBar {
+    background-color: #1b2430;
+    border-bottom: 1px solid #2a3542;
+}
+
+#topBar QLabel {
+    background: transparent;
+    font-size: 14px;
+    color: #b8c2cc;
+}
+
+/* ---- 左侧导航 ---- */
+#navList {
+    background-color: #1b2430;
+    border: none;
+    border-right: 1px solid #2a3542;
+    outline: 0;
+}
+
+#navList::item {
+    height: 44px;
+    padding-left: 16px;
+    color: #b8c2cc;
+    border: none;
+    border-left: 3px solid transparent;
+}
+
+#navList::item:hover {
+    background-color: #223042;
+    color: #ffffff;
+}
+
+#navList::item:selected {
+    background-color: #2c3e55;
+    color: #ffffff;
+    border-left: 3px solid #3f9eff;
+}
+
+/* ---- 内容区 ---- */
+QStackedWidget {
+    background-color: #141a21;
+}
+
+QLabel#pageTitle {
+    font-size: 20px;
+    font-weight: bold;
+    color: #f0f4f8;
+}
+
+QLabel#metricLabel {
+    font-size: 26px;
+    font-weight: bold;
+    color: #3f9eff;
+}
+
+QLabel#metricCaption {
+    color: #8a97a5;
+    font-size: 13px;
+}
+
+QGroupBox {
+    border: 1px solid #2a3542;
+    border-radius: 6px;
+    margin-top: 12px;
+    padding-top: 10px;
+    background-color: #1b2430;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 12px;
+    padding: 0 4px;
+    color: #9fb0c1;
+}
+
+/* ---- 表格 ---- */
+QTableWidget {
+    background-color: #1b2430;
+    alternate-background-color: #1e2836;
+    gridline-color: #2a3542;
+    border: 1px solid #2a3542;
+    selection-background-color: #2c3e55;
+    selection-color: #ffffff;
+}
+
+QHeaderView::section {
+    background-color: #223042;
+    color: #9fb0c1;
+    padding: 6px;
+    border: none;
+    border-right: 1px solid #2a3542;
+    border-bottom: 1px solid #2a3542;
+    font-weight: bold;
+}
+
+/* ---- 输入框 / 下拉 ---- */
+QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QTextEdit, QPlainTextEdit {
+    background-color: #1b2430;
+    border: 1px solid #2a3542;
+    border-radius: 4px;
+    padding: 5px 8px;
+    selection-background-color: #3f9eff;
+}
+
+QLineEdit:focus, QComboBox:focus, QTextEdit:focus, QPlainTextEdit:focus {
+    border-color: #3f9eff;
+}
+
+QComboBox::drop-down {
+    border: none;
+    width: 22px;
+}
+
+/* ---- 按钮 ---- */
+QPushButton {
+    background-color: #2c3e55;
+    border: 1px solid #3a4c63;
+    border-radius: 4px;
+    padding: 6px 16px;
+    color: #e8eef4;
+}
+
+QPushButton:hover {
+    background-color: #35506e;
+    border-color: #3f9eff;
+}
+
+QPushButton:pressed {
+    background-color: #223042;
+}
+
+QPushButton:disabled {
+    background-color: #232c37;
+    color: #6b7684;
+    border-color: #2a3542;
+}
+
+QPushButton#primaryButton {
+    background-color: #3f9eff;
+    border: none;
+    color: #ffffff;
+    font-weight: bold;
+}
+
+QPushButton#primaryButton:hover {
+    background-color: #5aadff;
+}
+
+QPushButton#dangerButton {
+    background-color: #c0504d;
+    border: none;
+    color: #ffffff;
+}
+
+QPushButton#dangerButton:hover {
+    background-color: #d2625f;
+}
+
+/* ---- 滚动条 ---- */
+QScrollBar:vertical {
+    background: #1b2430;
+    width: 10px;
+    margin: 0;
+}
+
+QScrollBar::handle:vertical {
+    background: #3a4c63;
+    border-radius: 5px;
+    min-height: 30px;
+}
+
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0;
+}
+
+QScrollBar:horizontal {
+    background: #1b2430;
+    height: 10px;
+    margin: 0;
+}
+
+QScrollBar::handle:horizontal {
+    background: #3a4c63;
+    border-radius: 5px;
+    min-width: 30px;
+}
+
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+    width: 0;
+}
+
+/* ---- 图表 ---- */
+QChartView {
+    background-color: #1b2430;
+}
+
+/* ---- 工具提示 ---- */
+QToolTip {
+    background-color: #2c3e55;
+    color: #e8eef4;
+    border: 1px solid #3a4c63;
+    padding: 4px;
+}
