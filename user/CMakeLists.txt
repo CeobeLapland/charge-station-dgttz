@@ -10,7 +10,7 @@ set(CMAKE_AUTORCC ON)
 
 # 找到 Qt6 及用户端所需的模块
 find_package(Qt6 REQUIRED COMPONENTS
-    Core Gui Qml Quick QuickControls2 WebSockets Network
+    Core Gui Qml Quick QuickControls2 WebSockets Network WebEngineQuick
 )
 
 # 公共代码（协议常量/消息封装）位于仓库根的 common/，各端 include 而非复制。
@@ -28,6 +28,10 @@ qt_add_executable(charge_user_client
     src/AuthStore.cpp
     src/Theme.h
     src/Theme.cpp
+    src/ExploreData.h
+    src/ExploreData.cpp
+    src/UserData.h
+    src/UserData.cpp
     qml/Main.qml
     qml/pages/LoginPage.qml
     qml/pages/RegisterPage.qml
@@ -36,11 +40,14 @@ qt_add_executable(charge_user_client
     qml/pages/AppealPage.qml
     qml/pages/HomePage.qml
     qml/pages/ExplorePage.qml
+    qml/pages/StationDetailPage.qml
     qml/pages/MessagePage.qml
     qml/pages/ProfilePage.qml
+    qml/pages/OrderPage.qml
     qml/pages/SettingsPage.qml
     qml/components/BottomNav.qml
     qml/components/ConfirmDialog.qml
+    qml/map/explore_map.qrc
     qml/qtquickcontrols2.conf
 )
 
@@ -56,8 +63,10 @@ qt_add_qml_module(charge_user_client
         qml/pages/AppealPage.qml
         qml/pages/HomePage.qml
         qml/pages/ExplorePage.qml
+        qml/pages/StationDetailPage.qml
         qml/pages/MessagePage.qml
         qml/pages/ProfilePage.qml
+        qml/pages/OrderPage.qml
         qml/pages/SettingsPage.qml
         qml/components/BottomNav.qml
         qml/components/ConfirmDialog.qml
@@ -72,6 +81,7 @@ target_link_libraries(charge_user_client PRIVATE
     Qt6::Quick
     Qt6::QuickControls2
     Qt6::WebSockets
+    Qt6::WebEngineQuick
 )
 
 install(TARGETS charge_user_client

@@ -6,12 +6,18 @@
 #include <QQmlEngine>
 #include <QQmlError>
 #include <QtQml/qqml.h>
+#include <QtWebEngineQuick/qtwebenginequickglobal.h>
 
 #include "UserClient.h"
 #include "AuthStore.h"
 #include "Theme.h"
+#include "ExploreData.h"
+#include "UserData.h"
 
 int main(int argc, char *argv[]) {
+    // 探索页地图使用 QtWebEngine 加载 MapLibre GL JS，需在创建 QGuiApplication 前初始化
+    QCoreApplication::setAttribute(Qt::AA_ShareOpenGLContexts);
+    QtWebEngineQuick::initialize();
     QGuiApplication app(argc, argv);
     QCoreApplication::setOrganizationName(QStringLiteral("chargeStation"));
     QCoreApplication::setOrganizationDomain(QStringLiteral("charge.local"));
@@ -51,6 +57,14 @@ int main(int argc, char *argv[]) {
     // 编译期类型路径，AOT 安全，且无 QQmlContext 冲突。
     static Theme theme;   // 静态生命周期，存活的时长覆盖整个程序
     qmlRegisterSingletonInstance("UserClient", 1, 0, "Theme", &theme);
+
+    // 探索页 mock 数据：充电站/商户/省市区/评价等。
+    static ExploreData exploreData;
+    qmlRegisterSingletonInstance("UserClient", 1, 0, "ExploreData", &exploreData);
+
+    // 用户个人域 mock 数据：我的/订单/消息/结算等。
+    static UserData userData;
+    qmlRegisterSingletonInstance("UserClient", 1, 0, "UserData", &userData);
 
     const QUrl url(QStringLiteral("qrc:/UserClient/qml/Main.qml"));
     QObject::connect(

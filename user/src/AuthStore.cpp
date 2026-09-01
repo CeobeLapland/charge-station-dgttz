@@ -130,3 +130,63 @@ void AuthStore::submitAppeal(const QString& account, const QString& description,
                         QString::fromUtf8(QJsonDocument(list).toJson(QJsonDocument::Compact)));
     m_settings.sync();
 }
+
+// —— 全局设置：地图瓦片源 ——
+
+namespace {
+// 预置瓦片源字典。注意：template 里 {x} {y} {z} 由 MapLibre 替换；
+// 若高德风格有多域负载均衡（{1-4}），在 MapLibre 会按 tiles 数组展开。
+// 为简化代码，每个 preset 的 template 必须是单 URL（多域名用若干 {a..d} 占位符）。
+QStringList kPresetRows() {
+    return {
+        // id, name, tileUrlTemplate
+        "amap_std|高德街道（国内推荐）|https://webrd0{1,2,3,4}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}",
+        "amap_sat|高德卫星|https://webst0{1,2,3,4}.is.autonavi.com/appmaptile?style=6&x={x}&y={y}&z={z}",
+        "osm_hot|OSM 人道版（街道文字丰富）|https://{a,b,c}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png",
+        "osm_std|OSM 标准（海外网络可用）|https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+        "custom|自定义（填自定义 URL 模板）|<custom>"
+    };
+}
+const QString kDefaultId = QStringLiteral("amap_std");
+const QString kPrefGroup = QStringLiteral("prefs/map/");
+}
+
+QString AuthStore::mapTileSource() const {
+    return m_settings.value(kPrefGroup + QStringLiteral("source"), kDefaultId).toString();
+}
+
+void AuthStore::setMapTileSource(const QString& id) {
+    const QString old = mapTileSource();
+    if (id.isEmpty() || id == old)
+        return;
+    m_settings.setValue(kPrefGroup + QStringLiteral("source"), id);
+    m_settings.sync();
+    emit mapTileSourceChanged();
+}
+
+QString AuthStore::mapTileCustomUrl() const {
+    return m_settings.value(kPrefGroup + QStringLiteral("custom_url"), QString()).toString();
+}
+
+void AuthStore::setMapTileCustomUrl(const QString& url) {
+    const QString old = mapTileCustomUrl();
+    if (url == old)
+        return;
+    m_settings.setValue(kPrefGroup + QStringLiteral("custom_url"), url);
+    m_settings.sync();
+    emit mapTileCustomUrlChanged();
+}
+
+QString AuthStore::mapTilePresetsJson() const {
+    QJsonArray arr;
+    for (const QString& row : kPresetRows()) {
+        const QStringList parts = row.split(QLatin1Char('|'));
+        if (parts.size() < 3) continue;
+        QJsonObject o;
+        o.insert(QStringLiteral("id"),       parts.at(0));
+        o.insert(QStringLiteral("name"),     parts.at(1));
+        o.insert(QStringLiteral("template"), parts.at(2));
+        arr.append(o);
+    }
+    return QString::fromUtf8(QJsonDocument(arr).toJson(QJsonDocument::Compact));
+}

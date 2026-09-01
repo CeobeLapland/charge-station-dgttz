@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>探索地图</title>
+<!-- MapLibre GL JS：下载后打包进 qrc，离线可用，不再依赖 unpkg CDN 网络 -->
+<script src="lib/maplibre-gl.js"></script>
+<link rel="stylesheet" href="lib/maplibre-gl.css">
+<style>
+  html, body, #map { margin: 0; padding: 0; width: 100%; height: 100%; background: #e0e4e8; }
+  .err-banner {
+    position: absolute; left: 12px; right: 12px; bottom: 20px; z-index: 10;
+    background: rgba(220,53,69,0.92); color: #fff; font: 13px/1.4 system-ui, sans-serif;
+    padding: 8px 12px; border-radius: 6px; display: none;
+  }
+  /* 地图点标注：图标 + 气泡价格 + 指示三角 */
+  .stn-marker {
+    position: relative; width: 44px; height: 54px; transform: translate(-50%, -100%);
+    filter: drop-shadow(0 2px 3px rgba(0,0,0,.18));
+    cursor: pointer;
+  }
+  .stn-marker .pin {
+    width: 44px; height: 50px; border-radius: 22px 22px 22px 4px; background: #0e7dff;
+    color: #fff; transform: rotate(-45deg); display: flex; align-items: center; justify-content: center;
+    box-shadow: inset 0 0 0 2px rgba(255,255,255,.65);
+  }
+  .stn-marker .pin span { transform: rotate(45deg); font: bold 11px/1 system-ui, sans-serif; }
+  .stn-marker.has-swap .pin { background: #12b76a; }
+  .stn-marker.fault .pin  { background: #f04438; }
+  .stn-marker.busy  .pin  { background: #f79009; }
+  .stn-marker .bubble {
+    position: absolute; left: 50%; top: -14px; transform: translateX(-50%);
+    background: #fff; color: #0e7dff; border: 1px solid #d7e2f0; border-radius: 10px;
+    padding: 2px 8px; font: 600 11px/18px system-ui, sans-serif; white-space: nowrap;
+    box-shadow: 0 1px 2px rgba(12,20,38,.1);
+  }
+  .stn-marker .bubble::after {
+    content: ""; position: absolute; left: 50%; bottom: -4px; transform: translateX(-50%) rotate(45deg);
+    width: 6px; height: 6px; background: #fff; border-right: 1px solid #d7e2f0; border-bottom: 1px solid #d7e2f0;
+  }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div class="err-banner" id="err"></div>
+<script>
+  // 默认定位点：北京（之后由服务端模拟用户位置 / 一键找桩驱动这里移动）
+  var DEFAULT_CENTER = [116.397128, 39.916527];
+  var DEFAULT_TEMPLATE =
+    'https://webrd0{1,2,3,4}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}';
+
+  // 缩放阈值：小于此 zoom（不够贴近）时隐藏 marker，避免市级以上密密麻麻
+  var MARKER_MIN_ZOOM = 11;
+  var ERR_THRESHOLD = 6;
+
+  var errBanner = document.getElementById('err');
+  function showErr(msg) { errBanner.style.display = 'block'; errBanner.textContent = msg; }
+  function hideErr()    { errBanner.style.display = 'none'; }
+
+  function expandTemplate(tmpl) {
+    if (!tmpl) return [];
+    var re = /\{([^{},]+(?:,[^{},]+)+)\}/;
+    var m = tmpl.match(re);
+    if (!m) return [tmpl];
+    var parts = m[1].split(',');
+    var out = [];
+    for (var i = 0; i < parts.length; i++)
+      out.push(tmpl.slice(0, m.index) + parts[i].trim() + tmpl.slice(m.index + m[0].length));
+    return out;
+  }
+
+  var map;
+  try {
+    map = new maplibregl.Map({
+      container: 'map',
+      center: DEFAULT_CENTER,
+      zoom: 13,
+      style: {
+        version: 8,
+        glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
+        sources: {
+          osm: {
+            type: 'raster',
+            tiles: expandTemplate(DEFAULT_TEMPLATE),
+            tileSize: 256
+          }
+        },
+        layers: [
+          { id: 'bg', type: 'background', paint: { 'background-color': '#e0e4e8' } },
+          { id: 'osm', type: 'raster', source: 'osm' }
+        ]
+      }
+    });
+  } catch (e) {
+    showErr('地图初始化失败：' + e.message);
+    throw e;
+  }
+
+  var failCount = 0;
+  map.on('error', function (e) {
+    var msg = ((e.error && (e.error.message || e.error.statusText)) || String(e.error || '')).toLowerCase();
+    if (/tile|fetch|network|unreachable|timedout|timeout|net::err/.test(msg) || !msg) {
+      failCount++;
+      if (failCount >= ERR_THRESHOLD) showErr('当前瓦片源加载失败，请在设置里切换地图源。');
+    }
+  });
+
+  // —— 数据：充电站，按 station.id 建 DOM 标记缓存 ——
+  var STATIONS = [];        // [{id,name,lng,lat,owner_type,merchant_id,merchant_name,has_swap,rating,fast_idle,...}]
+  var FILTER = {            // 当前筛选条件（由 QML 写入）
+    owner: 'all',           // 'all' / 'self_run' / 'merchant:<id>'
+    minRating: 0,           // 0/3/4/4.5
+    swap: false,            // 仅显示支持换电
+    province: '', city: '', district: ''
+  };
+  var MARKERS = {};         // stationId -> markerEl + maplibre Marker
+  var visibleIds = {};      // 受 zoom + filter 影响当前是否挂在地图上
+
+  function classify(s) {
+    // 外观分类：fault 红 / busy（无空闲+有充电）橙 / swap 绿 / 默认蓝
+    if ((s.fault_count || 0) > 0) return 'fault';
+    if (((s.fast_idle||0)+(s.slow_idle||0)) === 0 && (s.charging_count||0) > 0) return 'busy';
+    if (s.has_swap) return 'has-swap';
+    return '';
+  }
+
+  function stationMatches(s) {
+    if (FILTER.swap && !s.has_swap) return false;
+    if (FILTER.minRating > 0 && (s.rating || 0) < FILTER.minRating) return false;
+    if (FILTER.owner === 'self_run') {
+      if (s.owner_type !== 'self_run') return false;
+    } else if (/^merchant:/.test(FILTER.owner)) {
+      var mid = parseInt(FILTER.owner.split(':')[1], 10);
+      if ((s.merchant_id || 0) !== mid) return false;
+    }
+    // 城市过滤
+    if (FILTER.province && s.area_province !== FILTER.province) return false;
+    if (FILTER.city     && s.area_city     !== FILTER.city)     return false;
+    if (FILTER.district && s.area_district !== FILTER.district) return false;
+    return true;
+  }
+
+  function price(s) {
+    // 起算单价：展示 bubble 用，粗略按服务费 + 最低价
+    if (s._minPrice) return s._minPrice;
+    return '';
+  }
+
+  function buildMarkerEl(s) {
+    var el = document.createElement('div');
+    el.className = 'stn-marker ' + classify(s);
+    var bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    bubble.textContent = '⭐ ' + (typeof s.rating === 'number' ? s.rating.toFixed(1) : '-');
+    el.appendChild(bubble);
+    var pin = document.createElement('div');
+    pin.className = 'pin';
+    var label = document.createElement('span');
+    label.textContent = ((s.fast_idle||0)+(s.slow_idle||0)) + '空';
+    pin.appendChild(label);
+    el.appendChild(pin);
+    el.addEventListener('click', function (ev) {
+      ev.stopPropagation();
+      // 调用 QML 暴露的全局回调（不存在也不报错，QML 侧会在页面里赋值）
+      if (window.__onStationClicked) window.__onStationClicked(s.id);
+    });
+    return el;
+  }
+
+  function ensureMarker(s) {
+    if (!MARKERS[s.id]) {
+      var el = buildMarkerEl(s);
+      var mkr = new maplibregl.Marker({ element: el, anchor: 'bottom' })
+                  .setLngLat([s.longitude, s.latitude]);
+      MARKERS[s.id] = { marker: mkr, el: el, station: s };
+    }
+    return MARKERS[s.id];
+  }
+
+  function zoomOk() { return (map.getZoom() || 0) >= MARKER_MIN_ZOOM; }
+
+  function refreshMarkers() {
+    var ok = zoomOk();
+    var nextVisible = {};
+    for (var i = 0; i < STATIONS.length; i++) {
+      var s = STATIONS[i];
+      var show = ok && stationMatches(s);
+      if (show) {
+        var rec = ensureMarker(s);
+        if (!visibleIds[s.id]) rec.marker.addTo(map);
+        nextVisible[s.id] = true;
+      }
+    }
+    // 不再需要的移除
+    for (var id in visibleIds) {
+      if (!nextVisible[id] && MARKERS[id]) MARKERS[id].marker.remove();
+    }
+    visibleIds = nextVisible;
+  }
+
+  // zoom/filter/区域变动时重算显示
+  map.on('zoom', refreshMarkers);
+  map.on('moveend', refreshMarkers);
+
+  // —— QML ←→ JS 接口 ——
+
+  // 1) 设定瓦片源
+  function setTileTemplate(template) {
+    failCount = 0;
+    hideErr();
+    try {
+      var tiles = expandTemplate(template);
+      if (!tiles.length) { showErr('瓦片模板为空。'); return; }
+      var src = map.getSource('osm');
+      if (!src) return;
+      src.setTiles(tiles);
+    } catch (e) {
+      showErr('切换瓦片失败：' + (e.message || e));
+    }
+  }
+
+  // 2) 交互开关
+  function setInteractive(on) {
+    var lock = on ? 'enable' : 'disable';
+    var ctrl = ['dragPan', 'scrollZoom', 'doubleClickZoom', 'touchZoomRotate',
+                'keyboard', 'boxZoom', 'cooperativeGestures'];
+    for (var i = 0; i < ctrl.length; i++) {
+      try { map[ctrl[i]] && map[ctrl[i]][lock](); } catch (e) {}
+    }
+  }
+  setInteractive(false);
+
+  // 3) 注入完整充电站数组（从 QML 传 JSON），随后重新生成 marker
+  function setStations(jsonOrArray) {
+    STATIONS = Array.isArray(jsonOrArray) ? jsonOrArray : (JSON.parse(jsonOrArray || '[]'));
+    // 清旧 marker
+    for (var id in MARKERS) try { MARKERS[id].marker.remove(); } catch(e){}
+    MARKERS = {};
+    visibleIds = {};
+    // 冒泡显示：先把 minPrice 算出来（后续电价接入时再精细）
+    refreshMarkers();
+  }
+
+  // 4) 筛选条件：owner ('all'/'self_run'/ 'merchant:<id>'), minRating(0/3/4/4.5), swap(true/false)
+  function setFilter(owner, minRating, swap, province, city, district) {
+    FILTER.owner       = owner || 'all';
+    FILTER.minRating   = Number(minRating) || 0;
+    FILTER.swap        = !!swap;
+    FILTER.province    = province || '';
+    FILTER.city        = city || '';
+    FILTER.district    = district || '';
+    refreshMarkers();
+  }
+
+  // 5) 飞镜头到中心（城市跳转、点击 marker 后微调）
+  function flyTo(lng, lat, zoom) {
+    map.flyTo({
+      center: [Number(lng), Number(lat)],
+      zoom:   typeof zoom === 'number' ? zoom : Math.max(MARKER_MIN_ZOOM + 1, map.getZoom() || 13),
+      speed:  1.2,
+      essential: true
+    });
+  }
+
+  // 6) 显示/隐藏 marker 的最小 zoom（可配置，默认 11）
+  function setMarkerMinZoom(z) { MARKER_MIN_ZOOM = Number(z) || 11; refreshMarkers(); }
+</script>
+</body>
+</html>

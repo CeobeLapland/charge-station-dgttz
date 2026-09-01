@@ -8,7 +8,7 @@ Dialog {
     modal: true
     focus: true
     anchors.centerIn: Overlay.overlay
-    width: Math.min(320, Overlay.overlay.width - 64)
+    width: Overlay.overlay ? Math.min(320, Overlay.overlay.width - 64) : 320
     padding: 20
     closePolicy: Popup.NoAutoClose
 
