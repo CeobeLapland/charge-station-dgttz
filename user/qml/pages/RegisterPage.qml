@@ -10,6 +10,12 @@ Item {
     property string account: ""
     property string password: ""
 
+    // 不透明背景：遮住下层登录页（页面根 Item 默认透明）
+    Rectangle {
+        anchors.fill: parent
+        color: Theme.background
+    }
+
     // 顶部返回
     Rectangle {
         width: 40
@@ -250,8 +256,10 @@ Item {
     function doRegister() {
         var acc = accountField.text.trim()
         var pw = passwordField.text
+        var cp = confirmField.text.trim()
         if (acc.length === 0) { showErr(qsTr("请输入账号")); return }
         if (pw.length === 0) { showErr(qsTr("请输入密码")); return }
+        if (cp.length === 0) { showErr(qsTr("请输入确认密码")); return }
         if (pw !== confirmField.text) { showErr(qsTr("两次输入的密码不一致")); return }
         if (authStore.hasAccount(acc)) { showErr(qsTr("该账号已注册，请直接登录")); return }
 

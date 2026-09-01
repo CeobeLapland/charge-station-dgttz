@@ -43,6 +43,17 @@ public:
     // 启动时自动登录的账号（若存在勾选自动登录的账号则返回其账号，否则空串）
     Q_INVOKABLE QString autoLoginAccount() const;
 
+    // —— 账号状态（对应 user.status：normal / frozen；未接服务端前本地模拟）——
+    Q_INVOKABLE QString accountStatus(const QString& account) const;
+    Q_INVOKABLE bool isFrozen(const QString& account) const;
+    Q_INVOKABLE void setAccountStatus(const QString& account, const QString& status);
+
+    // 重置账号密码（找回密码成功后更新本地配置）
+    Q_INVOKABLE void resetPassword(const QString& account, const QString& newPassword);
+    // 提交申诉（本地模拟，对应 work_order：type=user_complaint、status=pending，后续接服务端）
+    Q_INVOKABLE void submitAppeal(const QString& account, const QString& description,
+                                  const QStringList& images);
+
 signals:
     void currentAccountChanged();
 

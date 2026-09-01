@@ -2,15 +2,26 @@ import QtQuick
 import QtQuick.Controls
 import UserClient
 
-// 「我的」页（占位骨架）
+// 「个人」页：右上角设置图标入口，点击进入设置页
 Item {
     id: root
-    property int navIndex: 2
+    property int navIndex: 3
 
-    Column {
-        anchors.centerIn: parent
-        spacing: 12
-        Text { text: qsTr("我的"); font.pixelSize: Theme.fontSizeLarge; font.bold: true; color: Theme.textPrimary }
-        Text { text: qsTr("头像 / 昵称 / 余额将在此展示"); color: Theme.textSecondary }
+    readonly property var stackView: StackView.view
+
+    // 右上角设置图标（大号）
+    Text {
+        id: settingsIcon
+        anchors.top: parent.top
+        anchors.right: parent.right
+        anchors.topMargin: 20
+        anchors.rightMargin: 20
+        text: "⚙️"
+        font.pixelSize: 32
+        color: Theme.textPrimary
+        MouseArea {
+            anchors.fill: parent
+            onClicked: root.stackView.push("qrc:/UserClient/qml/pages/SettingsPage.qml")
+        }
     }
 }

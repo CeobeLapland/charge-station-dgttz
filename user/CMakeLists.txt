@@ -31,9 +31,14 @@ qt_add_executable(charge_user_client
     qml/Main.qml
     qml/pages/LoginPage.qml
     qml/pages/RegisterPage.qml
+    qml/pages/SwitchAccountPage.qml
+    qml/pages/FindPasswordPage.qml
+    qml/pages/AppealPage.qml
     qml/pages/HomePage.qml
-    qml/pages/OrderPage.qml
+    qml/pages/ExplorePage.qml
+    qml/pages/MessagePage.qml
     qml/pages/ProfilePage.qml
+    qml/pages/SettingsPage.qml
     qml/components/BottomNav.qml
     qml/components/ConfirmDialog.qml
     qml/qtquickcontrols2.conf
@@ -46,9 +51,14 @@ qt_add_qml_module(charge_user_client
         qml/Main.qml
         qml/pages/LoginPage.qml
         qml/pages/RegisterPage.qml
+        qml/pages/SwitchAccountPage.qml
+        qml/pages/FindPasswordPage.qml
+        qml/pages/AppealPage.qml
         qml/pages/HomePage.qml
-        qml/pages/OrderPage.qml
+        qml/pages/ExplorePage.qml
+        qml/pages/MessagePage.qml
         qml/pages/ProfilePage.qml
+        qml/pages/SettingsPage.qml
         qml/components/BottomNav.qml
         qml/components/ConfirmDialog.qml
     RESOURCES

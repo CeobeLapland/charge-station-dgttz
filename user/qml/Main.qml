@@ -59,7 +59,8 @@ ApplicationWindow {
             onPageRequested: function (index) {
                 var pages = [
                     Qt.resolvedUrl("pages/HomePage.qml"),
-                    Qt.resolvedUrl("pages/OrderPage.qml"),
+                    Qt.resolvedUrl("pages/ExplorePage.qml"),
+                    Qt.resolvedUrl("pages/MessagePage.qml"),
                     Qt.resolvedUrl("pages/ProfilePage.qml")
                 ]
                 bottomNav.currentIndex = index
@@ -92,11 +93,15 @@ ApplicationWindow {
     function applyAuthView() {
         var cur = pageStack.currentItem
         var wantLogin = !authStore.isLoggedIn
-        // 主界面三页都有 navIndex；登录/注册页没有
+        // 主界面四页都有 navIndex；登录页标记 isLoginPage
         var onMain = cur ? (cur.navIndex !== undefined) : false
+        var onLogin = cur ? (cur.isLoginPage === true) : false
         bottomNav.visible = !wantLogin
-        if (wantLogin === !onMain)
-            return // 已在目标视图，无需切换
+        if (wantLogin && onLogin)
+            return // 已在登录页，无需切换
+        if (!wantLogin && onMain)
+            return // 已在主界面，无需切换
+        // 其余情况（如设置页退出登录、注册成功等）统一切到目标页
         pageStack.pop(null)
         pageStack.replace(wantLogin
                           ? Qt.resolvedUrl("pages/LoginPage.qml")

@@ -2,7 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import UserClient
 
-// 底部三导航：充电 / 订单 / 我的（见 spec-用户端）
+// 底部四导航：首页 / 探索 / 消息 / 个人
 Item {
     id: root
     property int currentIndex: 0
@@ -22,9 +22,10 @@ Item {
         anchors.topMargin: 6
         anchors.bottomMargin: 6
 
-        NavButton { index: 0; label: qsTr("充电"); icon: "⚡"; active: root.currentIndex === 0 }
-        NavButton { index: 1; label: qsTr("订单"); icon: "📋"; active: root.currentIndex === 1 }
-        NavButton { index: 2; label: qsTr("我的"); icon: "👤"; active: root.currentIndex === 2 }
+        NavButton { index: 0; label: qsTr("首页"); icon: "🏠"; active: root.currentIndex === 0 }
+        NavButton { index: 1; label: qsTr("探索"); icon: "🧭"; active: root.currentIndex === 1 }
+        NavButton { index: 2; label: qsTr("消息"); icon: "💬"; active: root.currentIndex === 2 }
+        NavButton { index: 3; label: qsTr("个人"); icon: "👤"; active: root.currentIndex === 3 }
     }
 
     component NavButton: Rectangle {
@@ -35,7 +36,7 @@ Item {
         property bool active: false
 
         color: "transparent"
-        width: parent.width / 3
+        width: parent.width / 4
         height: parent.height
 
         Column {

@@ -1,6 +1,9 @@
 #include "AuthStore.h"
 
 #include <QDateTime>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 
 AuthStore::AuthStore(QObject* parent)
     : QObject(parent), m_settings() {
@@ -84,4 +87,46 @@ QString AuthStore::autoLoginAccount() const {
             return account;
     }
     return QString();
+}
+
+QString AuthStore::accountStatus(const QString& account) const {
+    return m_settings.value(groupKey(account) + QStringLiteral("/status"),
+                            QStringLiteral("normal")).toString();
+}
+
+bool AuthStore::isFrozen(const QString& account) const {
+    return accountStatus(account) == QStringLiteral("frozen");
+}
+
+void AuthStore::setAccountStatus(const QString& account, const QString& status) {
+    if (!hasAccount(account))
+        return;
+    m_settings.setValue(groupKey(account) + QStringLiteral("/status"), status);
+    m_settings.sync();
+}
+
+void AuthStore::resetPassword(const QString& account, const QString& newPassword) {
+    if (!hasAccount(account) || newPassword.isEmpty())
+        return;
+    m_settings.setValue(groupKey(account) + QStringLiteral("/password"), newPassword);
+    m_settings.sync();
+}
+
+void AuthStore::submitAppeal(const QString& account, const QString& description,
+                             const QStringList& images) {
+    QJsonObject rec;
+    rec.insert(QStringLiteral("account"), account);
+    rec.insert(QStringLiteral("description"), description);
+    rec.insert(QStringLiteral("images"), QJsonArray::fromStringList(images));
+    rec.insert(QStringLiteral("status"), QStringLiteral("pending"));
+    rec.insert(QStringLiteral("create_time"),
+               QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss")));
+
+    QJsonArray list = QJsonDocument::fromJson(
+                          m_settings.value(QStringLiteral("appeals/list")).toString().toUtf8())
+                          .array();
+    list.append(rec);
+    m_settings.setValue(QStringLiteral("appeals/list"),
+                        QString::fromUtf8(QJsonDocument(list).toJson(QJsonDocument::Compact)));
+    m_settings.sync();
 }
