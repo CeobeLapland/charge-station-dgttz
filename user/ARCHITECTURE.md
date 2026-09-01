@@ -36,12 +36,18 @@ user/
 │   ├── UserClient.h/.cpp   # 通信层：protocol 信封封装、连接到服务端、消息收发
 │   └── （后续：各页面的 ViewModel / 领域模型）
 └── qml/
-    ├── Main.qml                    # 竖屏窗口 + StackView + 全局配色例子
+    ├── Main.qml                    # 竖屏窗口 + StackView + 三层导航切换
+    ├── Theme.qml                   # 全局主题（作为 context property "Theme" 注入，统一色调/字体/圆角）
     ├── qtquickcontrols2.conf       # Material 风格 + 主色
     ├── components/                 # 可复用控件（BottomNav 底部导航等）
     └── pages/                      # 页面
-        └── （各个页面）
+        ├── LoginPage.qml           # 手机号免密登录
+        ├── HomePage.qml            # 附近电站
+        ├── OrderPage.qml           # 订单
+        └── ProfilePage.qml         # 我的（占位骨架）
 ```
+
+> **主题机制**：`qml/Theme.qml` **不注册进 QML 模块**，而是由 `src/main.cpp` 用 `qt_add_resources` 单独打包后，经 `QQmlComponent` 加载并作为 context property `Theme` 注入根上下文。页面 `import UserClient` 后可直接 `Theme.background` 取样式。内置多套风格（`styles` 注册表），改 `Theme.styleName` 即整体换肤，当前默认 `techBlue`（现代科技蓝）。改用此方式是为避免 Theme.qml 同时被注册成模块类型，与 context property 同名导致冲突。
 
 ## 三、依赖与构建
 

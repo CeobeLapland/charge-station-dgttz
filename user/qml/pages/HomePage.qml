@@ -14,9 +14,9 @@ Item {
         Text {
             anchors.horizontalCenter: parent.horizontalCenter
             text: qsTr("附近电站")
-            font.pixelSize: 24
+            font.pixelSize: Theme.fontSizeLarge
             font.bold: true
-            color: "#212121"
+            color: Theme.textPrimary
         }
         Button {
             anchors.horizontalCenter: parent.horizontalCenter
@@ -26,7 +26,7 @@ Item {
         Text {
             anchors.horizontalCenter: parent.horizontalCenter
             text: qsTr("站点列表将在此展示")
-            color: "#757575"
+            color: Theme.textSecondary
         }
     }
 }

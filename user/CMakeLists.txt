@@ -24,12 +24,18 @@ qt_add_executable(charge_user_client
     src/main.cpp
     src/UserClient.h
     src/UserClient.cpp
+    src/AuthStore.h
+    src/AuthStore.cpp
+    src/Theme.h
+    src/Theme.cpp
     qml/Main.qml
     qml/pages/LoginPage.qml
+    qml/pages/RegisterPage.qml
     qml/pages/HomePage.qml
     qml/pages/OrderPage.qml
     qml/pages/ProfilePage.qml
     qml/components/BottomNav.qml
+    qml/components/ConfirmDialog.qml
     qml/qtquickcontrols2.conf
 )
 
@@ -39,10 +45,12 @@ qt_add_qml_module(charge_user_client
     QML_FILES
         qml/Main.qml
         qml/pages/LoginPage.qml
+        qml/pages/RegisterPage.qml
         qml/pages/HomePage.qml
         qml/pages/OrderPage.qml
         qml/pages/ProfilePage.qml
         qml/components/BottomNav.qml
+        qml/components/ConfirmDialog.qml
     RESOURCES
         qml/qtquickcontrols2.conf
 )

@@ -12,8 +12,8 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        color: root.parent.cardColor
-        border.color: "#e0e0e0"
+        color: Theme.card
+        border.color: Theme.border
         border.width: 1
     }
 
@@ -45,13 +45,13 @@ Item {
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: btn.icon
                 font.pixelSize: 22
-                color: btn.active ? root.parent.appPrimary : root.parent.textSecondary
+                color: btn.active ? Theme.primary : Theme.textSecondary
             }
             Text {
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: btn.label
                 font.pixelSize: 12
-                color: btn.active ? root.parent.appPrimary : root.parent.textSecondary
+                color: btn.active ? Theme.primary : Theme.textSecondary
             }
         }
 
