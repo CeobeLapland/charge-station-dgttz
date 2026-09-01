@@ -60,5 +60,6 @@ sudo apt install qt6-base-dev qt6-declarative-dev qt6-tools-dev \
 | 3 | nodejs / npm | `nodejs npm` | 大屏本地化 ECharts 可选工具链 | 可选（用 CDN 则不需要） | `sudo apt install nodejs npm` |
 | 4 | sqlite3 CLI | `sqlite3` | 调试查看 .db 文件 | 可选（Qt SQL 驱动已可用） | `sudo apt install sqlite3` |
 | 5 | Python ML 依赖 | `python3-numpy` `python3-scikit-learn` + pip 的 `fastapi uvicorn` | 机器学习加分端点（B 方案） | 可选 | `pip3 install fastapi uvicorn numpy scikit-learn` |
+| 6 | **Qt6 Charts** | `libqt6charts6-dev` | 管理端 QChart 营收折线图 | ⭐ 管理端必装 | `sudo apt install libqt6charts6-dev` |
 
 > 注意：仓库当前**未包含** WebSockets/WebEngine，若直接 `cmake` 会因缺少 `Qt6WebSockets`、`Qt6WebEngine` 报错。组内某台机器装好后，把 `spec-*` 之外的真实安装差异记到这里。
