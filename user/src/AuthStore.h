@@ -12,6 +12,9 @@ class AuthStore : public QObject {
     Q_OBJECT
     Q_PROPERTY(QString currentAccount READ currentAccount NOTIFY currentAccountChanged)
     Q_PROPERTY(bool isLoggedIn READ isLoggedIn NOTIFY currentAccountChanged)
+    // —— 全局设置（全用户共享，经 QSettings "prefs/*" 持久化）——
+    Q_PROPERTY(QString mapTileSource READ mapTileSource WRITE setMapTileSource NOTIFY mapTileSourceChanged)
+    Q_PROPERTY(QString mapTileCustomUrl READ mapTileCustomUrl WRITE setMapTileCustomUrl NOTIFY mapTileCustomUrlChanged)
 
 public:
     explicit AuthStore(QObject* parent = nullptr);
@@ -54,8 +57,18 @@ public:
     Q_INVOKABLE void submitAppeal(const QString& account, const QString& description,
                                   const QStringList& images);
 
+    // —— 全局设置：地图瓦片源 ——
+    QString mapTileSource() const;
+    void setMapTileSource(const QString& id);
+    QString mapTileCustomUrl() const;
+    void setMapTileCustomUrl(const QString& url);
+    // 预置瓦片源字典（JSON 数组字符串，QML 直接用）
+    Q_INVOKABLE QString mapTilePresetsJson() const;
+
 signals:
     void currentAccountChanged();
+    void mapTileSourceChanged();
+    void mapTileCustomUrlChanged();
 
 private:
     QString groupKey(const QString& account) const;
