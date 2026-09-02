@@ -10,6 +10,13 @@
     user_behavior: "用户行为异常",
     unknown: "未知告警"
   };
+  const alarmLevelLabels = {
+    critical: "严重",
+    warning: "警告",
+    info: "提示",
+    unknown: "未知"
+  };
+  const pageNames = new Set(["overview", "stations", "analytics", "alarms"]);
 
   const formatNumber = (value, digits = 0) => Number(value).toLocaleString("zh-CN", {
     minimumFractionDigits: digits,
@@ -82,18 +89,24 @@
       dot.className = "alarm-dot";
 
       const content = document.createElement("div");
+      content.className = "alarm-content";
       const title = document.createElement("strong");
       title.className = "alarm-title";
       title.textContent = alarmLabels[alarm.type] ?? `未知告警（${alarm.type}）`;
+      content.append(dot, title);
+
       const meta = document.createElement("div");
       meta.className = "alarm-meta";
       meta.textContent = `${alarm.station_name}${alarm.charger_id == null ? "" : ` · 桩 ${alarm.charger_id}`}`;
-      content.append(title, meta);
+
+      const level = document.createElement("span");
+      level.className = "alarm-level";
+      level.textContent = alarmLevelLabels[alarm.level] ?? alarmLevelLabels.unknown;
 
       const time = document.createElement("time");
       time.className = "alarm-time";
       time.textContent = formatTime(alarm.occur_time);
-      item.append(dot, content, time);
+      item.append(content, meta, level, time);
       list.appendChild(item);
     });
   }
@@ -147,7 +160,33 @@
     window.ScreenCharts.render(state.data);
   }
 
+  function showPage(pageName, updateHash = true) {
+    const safePage = pageNames.has(pageName) ? pageName : "overview";
+    document.querySelectorAll("[data-page]").forEach((page) => {
+      const active = page.dataset.page === safePage;
+      page.hidden = !active;
+      page.classList.toggle("active", active);
+    });
+    document.querySelectorAll("[data-page-target]").forEach((button) => {
+      button.classList.toggle("active", button.dataset.pageTarget === safePage);
+      button.setAttribute("aria-current", button.dataset.pageTarget === safePage ? "page" : "false");
+    });
+    if (updateHash && window.location.hash !== `#${safePage}`) {
+      window.history.replaceState(null, "", `#${safePage}`);
+    }
+    window.requestAnimationFrame(() => window.ScreenCharts.resize());
+  }
+
+  function setupNavigation() {
+    document.querySelectorAll("[data-page-target]").forEach((button) => {
+      button.addEventListener("click", () => showPage(button.dataset.pageTarget));
+    });
+    window.addEventListener("hashchange", () => showPage(window.location.hash.slice(1), false));
+    showPage(window.location.hash.slice(1) || "overview", false);
+  }
+
   function start() {
+    setupNavigation();
     window.setInterval(() => setText("clock", formatClock(new Date())), 1000);
     setText("clock", formatClock(new Date()));
     window.ScreenStore.subscribe(render);
