@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>东软电动汽车充电运营驾驶舱</title>
+    <link rel="stylesheet" href="css/dashboard.css">
+  </head>
+  <body>
+    <main class="dashboard">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">NEUSOFT EV OPERATIONS</p>
+          <h1>电动汽车充电运营驾驶舱</h1>
+        </div>
+        <div class="status-cluster">
+          <span id="mode-badge" class="badge badge-demo">演示数据</span>
+          <span id="connection-status" class="connection connection-offline">未连接</span>
+          <time id="clock" aria-label="当前时间"></time>
+        </div>
+      </header>
+
+      <section class="metric-grid" aria-label="核心运营指标">
+        <article class="metric-card metric-cyan">
+          <span class="metric-label">今日营收</span>
+          <strong id="today-revenue" class="metric-value">--</strong>
+          <span class="metric-unit">元</span>
+          <small id="revenue-trend" class="metric-trend">等待数据</small>
+        </article>
+        <article class="metric-card metric-blue">
+          <span class="metric-label">今日订单</span>
+          <strong id="today-orders" class="metric-value">--</strong>
+          <span class="metric-unit">笔</span>
+          <small id="orders-trend" class="metric-trend">等待数据</small>
+        </article>
+        <article class="metric-card metric-violet">
+          <span class="metric-label">当前充电</span>
+          <strong id="charging-count" class="metric-value">--</strong>
+          <span class="metric-unit">台</span>
+          <small class="metric-trend">实时设备状态</small>
+        </article>
+        <article class="metric-card metric-green">
+          <span class="metric-label">在线充电桩</span>
+          <strong id="online-rate" class="metric-value">--</strong>
+          <span class="metric-unit">%</span>
+          <small class="metric-trend">在线桩 / 总桩</small>
+        </article>
+      </section>
+
+      <section class="primary-grid">
+        <article class="panel">
+          <div class="panel-heading">
+            <div>
+              <span class="panel-kicker">STATION NETWORK</span>
+              <h2>充电站分布</h2>
+            </div>
+            <span class="panel-note">颜色表示当前负载</span>
+          </div>
+          <div id="station-chart" class="chart" role="img" aria-label="充电站分布散点图"></div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-heading">
+            <div>
+              <span class="panel-kicker">POWER LOAD</span>
+              <h2>实时功率负荷</h2>
+            </div>
+            <span class="panel-note">实线实际 · 虚线预测</span>
+          </div>
+          <div id="load-chart" class="chart" role="img" aria-label="实时和预测功率负荷曲线"></div>
+        </article>
+      </section>
+
+      <section class="secondary-grid">
+        <article class="panel compact-panel">
+          <div class="panel-heading">
+            <div>
+              <span class="panel-kicker">UTILIZATION</span>
+              <h2>利用率 TOP10</h2>
+            </div>
+          </div>
+          <div id="utilization-chart" class="chart chart-small" role="img" aria-label="充电站利用率排名"></div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-heading">
+            <div>
+              <span class="panel-kicker">REAL-TIME ALERTS</span>
+              <h2>实时告警</h2>
+            </div>
+            <span id="alarm-count" class="counter">0</span>
+          </div>
+          <div id="alarm-list" class="alarm-list" aria-live="polite"></div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-heading">
+            <div>
+              <span class="panel-kicker">USER GROWTH</span>
+              <h2>用户增长趋势</h2>
+            </div>
+          </div>
+          <div id="user-chart" class="chart chart-small" role="img" aria-label="用户增长趋势折线图"></div>
+        </article>
+
+        <article class="panel compact-panel">
+          <div class="panel-heading">
+            <div>
+              <span class="panel-kicker">ENERGY MIX</span>
+              <h2>峰谷电量分析</h2>
+            </div>
+          </div>
+          <div id="energy-chart" class="chart chart-small" role="img" aria-label="峰平谷电量占比图"></div>
+        </article>
+      </section>
+
+      <section class="event-panel panel">
+        <div class="panel-heading event-heading">
+          <div>
+            <span class="panel-kicker">LIVE EVENT STREAM</span>
+            <h2>实时事件流</h2>
+          </div>
+          <span id="last-updated" class="panel-note">尚未更新</span>
+        </div>
+        <div id="event-stream" class="event-stream" aria-live="polite"></div>
+      </section>
+    </main>
+
+    <div id="error-banner" class="error-banner" role="alert" hidden></div>
+
+    <!-- 开发阶段使用 CDN；正式离线交付前把 echarts.min.js 放入 vendor/ 并改成本地路径。 -->
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
+    <script src="js/config.js"></script>
+    <script src="mock/snapshot.js"></script>
+    <script src="js/adapter.js"></script>
+    <script src="js/store.js"></script>
+    <script src="js/websocket-client.js"></script>
+    <script src="js/charts.js"></script>
+    <script src="js/app.js"></script>
+  </body>
+</html>
