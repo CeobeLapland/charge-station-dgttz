@@ -2,9 +2,9 @@
   "use strict";
 
   const instances = new Map();
-  const axisColor = "#57738b";
-  const labelColor = "#83a1b9";
-  const splitColor = "rgba(107, 154, 190, 0.10)";
+  const axisColor = "#cbd5e1";
+  const labelColor = "#64748b";
+  const splitColor = "#edf2f7";
 
   function chartFor(id) {
     const element = document.getElementById(id);
@@ -226,7 +226,7 @@
         radius: ["42%", "70%"],
         center: ["50%", "45%"],
         label: { color: "#cce7f8", fontSize: 10, formatter: "{b}\n{d}%" },
-        itemStyle: { borderColor: "#0b1d30", borderWidth: 3 },
+        itemStyle: { borderColor: "#ffffff", borderWidth: 3 },
         data: [
           { name: "谷时", value: energy.valley, itemStyle: { color: "#45e0a8" } },
           { name: "平时", value: energy.flat, itemStyle: { color: "#4a86ff" } },
@@ -249,6 +249,9 @@
       renderUtilization(data.utilization_rank);
       renderUsers(data.user_growth);
       renderEnergy(data.energy_by_price_level);
+    },
+    resize() {
+      instances.forEach((chart) => chart.resize());
     },
     dispose() {
       instances.forEach((chart) => chart.dispose());
