@@ -2,362 +2,443 @@ import QtQuick
 import QtQuick.Controls
 import UserClient
 
-// 「我的」页：头像/昵称/手机号/余额 + 充值/改昵称 + 画像 + 车辆/优惠券/积分 + 功能入口。
-// 数据来自 UserData 单例（对齐 user/vehicle/coupon/point_record 等表）。
+// 「我的」页（Profile 个人页）。按 DATA_STRUCTURE 的 user/vehicle/coupon/point_record 等结构渲染。
+// 结构（自上而下，全部 ScrollView 内嵌 Column，间距均由 Column.spacing 控制，不使用 y 负值避免重叠）：
+//   ① 用户信息栏（渐变背景）：左侧头像+昵称+手机号+会员标+总用电；右侧：编辑按钮 + 设置按钮
+//   ② 会员中心入口卡片（点击进入 MemberCenterPage.qml）
+//   ③ 账户一行卡：余额 / 积分 / 优惠券 + 充值按钮 （积分→PointsDetail，优惠券→CouponDetail，充值→弹 Dialog）
+//   ④ 订单入口卡片：全部订单 / 已预约 / 待支付 / 开发票   （前三个→OrderPage 传筛选，发票→InvoicePage）
+//   ⑤ 占位：充电画像 + 我的车辆（后续扩展）
 Item {
     id: root
     property int navIndex: 3
     readonly property var stackView: StackView.view
 
-    // —— 当前用户信息（随 profileChanged 刷新）——
+    // —— 当前用户信息 ——
     property var profile: ({})
     readonly property var portrait: UserData.portrait()
     readonly property var vehiclesData: UserData.vehicles()
     readonly property var couponsData: UserData.coupons()
     readonly property var pointsData: UserData.pointRecords()
-
-    property string activeSheet: ""   // "" | vehicles | coupons | points
+    readonly property double totalKwh: UserData.totalEnergyKwh()
+    readonly property var curPlan: UserData.currentPlan()
 
     function refresh() { root.profile = UserData.profile() }
     Component.onCompleted: refresh()
-    Connections {
-        target: UserData
-        function onProfileChanged() { refresh() }
-    }
+    Connections { target: UserData; function onProfileChanged() { refresh() } }
 
     function levelText(lv) {
         if (lv === "vip") return qsTr("VIP 会员")
         if (lv === "enterprise") return qsTr("企业会员")
         return qsTr("普通会员")
     }
+    function levelColor(lv) {
+        if (lv === "vip") return "#FFD700"
+        if (lv === "enterprise") return "#9C27B0"
+        return Theme.textSecondary
+    }
 
-    // 不透明背景
+    // 背景
     Rectangle { anchors.fill: parent; color: Theme.background }
 
+    // ========================= 内容滚动区 =========================
     ScrollView {
         anchors.fill: parent
         clip: true
+
         Column {
             width: root.width
-            spacing: 16
+            spacing: 14
+            topPadding: 0
+            bottomPadding: 24
 
-            // 顶部渐变头部
+            // ========== ① 用户信息栏（渐变背景） ==========
             Rectangle {
                 width: parent.width
-                height: 176
-                color: Theme.primary
-                // 头像 + 昵称 + 手机号 + 等级
+                height: 180
+                gradient: Gradient {
+                    GradientStop { position: 0.0; color: Theme.primary }
+                    GradientStop { position: 1.0; color: Theme.accent }
+                }
+
+                // 右上角两个按钮：编辑 / 设置
                 Row {
-                    anchors.left: parent.left; anchors.right: parent.right
+                    anchors.top: parent.top; anchors.topMargin: 18
+                    anchors.right: parent.right; anchors.rightMargin: 16
+                    spacing: 8
+                    // 编辑按钮
+                    Rectangle {
+                        width: 64; height: 30; radius: 15
+                        color: "#FFFFFF22"
+                        border.color: "#FFFFFF55"; border.width: 1
+                        Text {
+                            anchors.centerIn: parent
+                            text: qsTr("编辑")
+                            color: "#ffffff"; font.pixelSize: Theme.fontSizeTiny; font.bold: true
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: root.stackView.push("qrc:/UserClient/qml/pages/EditProfilePage.qml")
+                        }
+                    }
+                    // 设置按钮
+                    Rectangle {
+                        width: 30; height: 30; radius: 15
+                        color: "#FFFFFF22"
+                        border.color: "#FFFFFF55"; border.width: 1
+                        Text {
+                            anchors.centerIn: parent
+                            text: "\u{2699}\u{FE0F}"; font.pixelSize: 16
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: root.stackView.push("qrc:/UserClient/qml/pages/SettingsPage.qml")
+                        }
+                    }
+                }
+
+                // 左侧：头像 + 名称/账号/会员/总用电量
+                Row {
+                    anchors.left: parent.left; anchors.leftMargin: 20
+                    anchors.right: parent.right; anchors.rightMargin: 16
                     anchors.verticalCenter: parent.verticalCenter
-                    anchors.leftMargin: 20; anchors.rightMargin: 20
                     spacing: 14
 
-                    // 头像（灰色占位圆）
+                    // 头像圆
                     Rectangle {
-                        width: 60; height: 60; radius: 30; color: "#FFFFFF"
+                        width: 68; height: 68; radius: 34
+                        color: "#FFFFFF"
+                        border.color: "#FFFFFF99"; border.width: 2
                         Text {
                             anchors.centerIn: parent
                             text: profile.avatar_path ? "" : "\u{1F464}"
-                            font.pixelSize: 34
+                            font.pixelSize: 36
                         }
                     }
 
+                    // 名称、账号、会员、总用电
                     Column {
-                        width: parent.width - 74
-                        spacing: 4
+                        width: parent.width - 68 - 14
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: 5
+                        // 昵称 + 会员标
                         Row {
+                            width: parent.width
                             spacing: 8
                             Text {
                                 text: profile.nickname || qsTr("用户")
-                                color: "#ffffff"; font.pixelSize: Theme.fontSizeTitle; font.bold: true
+                                color: "#ffffff"
+                                font.pixelSize: Theme.fontSizeTitle; font.bold: true
+                                elide: Text.ElideRight
+                                width: parent.width - 92
                             }
                             Rectangle {
-                                visible: !!profile.level && profile.level !== "normal"
-                                height: 20; width: levelTxt.implicitWidth + 12; radius: 10
-                                color: "#FFFFFF" + "33"
+                                visible: !!profile.level
+                                height: 20; width: levelLabel.implicitWidth + 12; radius: 10
+                                color: "#FFFFFF33"
                                 Text {
-                                    id: levelTxt
+                                    id: levelLabel
                                     anchors.centerIn: parent
-                                    text: levelText(profile.level)
+                                    text: root.levelText(profile.level)
+                                    color: root.levelColor(profile.level)
+                                    font.pixelSize: 10; font.bold: true
+                                }
+                            }
+                        }
+                        // 账号（手机号）
+                        Row {
+                            spacing: 6
+                            Text {
+                                text: qsTr("账号：")
+                                color: "#E6F0FF"; font.pixelSize: Theme.fontSizeTiny
+                            }
+                            Text {
+                                text: profile.phone || ""
+                                color: "#ffffff"; font.pixelSize: Theme.fontSizeTiny; font.bold: true
+                            }
+                        }
+                        // 总用电量
+                        Row {
+                            spacing: 6
+                            Text {
+                                text: qsTr("累计用电：")
+                                color: "#E6F0FF"; font.pixelSize: Theme.fontSizeTiny
+                            }
+                            Text {
+                                text: Number(root.totalKwh || 0).toFixed(1) + " kWh"
+                                color: "#ffffff"; font.pixelSize: Theme.fontSizeTiny; font.bold: true
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ========== ② 会员中心入口 ==========
+            Rectangle {
+                width: parent.width - 32; x: 16
+                height: memberRow.implicitHeight + 60
+                radius: Theme.radiusSmall
+                gradient: Gradient {
+                    GradientStop { position: 0.0; color: "#FFF8E1" }
+                    GradientStop { position: 1.0; color: "#FFECB3" }
+                }
+                border.color: "#FFD54F55"
+
+                Rectangle {
+                    id: memberRow
+                    anchors.fill: parent
+                    anchors.leftMargin: 16; anchors.rightMargin: 16
+                    // 左侧：皇冠
+                    Text {
+                        id: crownTxt
+                        anchors.left: parent.left
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "\u{1F451}"; font.pixelSize: 32
+                    }
+                    // 右侧：箭头
+                    Text {
+                        id: arrowTxt
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "›"; color: "#8D6E63"; font.pixelSize: 28
+                    }
+                    // 中间：文字区（左贴皇冠右贴箭头，自动适配）
+                    Column {
+                        anchors.left: crownTxt.right; anchors.leftMargin: 12
+                        anchors.right: arrowTxt.left; anchors.rightMargin: 12
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: 3
+                        Row {
+                            width: parent.width
+                            spacing: 6
+                            Text {
+                                text: qsTr("会员中心")
+                                color: "#5D4037"; font.pixelSize: Theme.fontSizeSmall; font.bold: true
+                            }
+                            Rectangle {
+                                visible: !!(curPlan && curPlan.status) && curPlan.status === "active"
+                                height: 18; width: daysLbl.implicitWidth + 10; radius: 9
+                                color: "#FF9800"
+                                Text {
+                                    id: daysLbl; anchors.centerIn: parent
+                                    text: qsTr("剩 ") + ((curPlan && curPlan.days_left) || 0) + qsTr(" 天")
                                     color: "#ffffff"; font.pixelSize: 10; font.bold: true
                                 }
                             }
                         }
                         Text {
-                            text: profile.phone || ""
-                            color: "#E6F0FF"; font.pixelSize: Theme.fontSizeSmall
+                            text: ((curPlan && curPlan.name) || qsTr("点击开通会员"))
+                                  + " · " + ((curPlan && curPlan.description) || qsTr("享充电折扣、积分倍增"))
+                            color: "#8D6E63"; font.pixelSize: Theme.fontSizeTiny
+                            elide: Text.ElideRight; width: parent.width
                         }
                     }
                 }
-
-                // 改昵称入口（头部右上）
-                Text {
-                    anchors.right: parent.right; anchors.top: parent.top
-                    anchors.rightMargin: 20; anchors.topMargin: 16
-                    text: qsTr("编辑")
-                    color: "#ffffff"; font.pixelSize: Theme.fontSizeSmall
-                    MouseArea { anchors.fill: parent; onClicked: nicknameDlg.open() }
-                }
-            }
-
-            // 余额卡片
-            Rectangle {
-                width: parent.width - 32
-                x: 16
-                height: 72
-                color: Theme.card; radius: Theme.radiusSmall; border.color: Theme.border
-                y: -40
-                Row {
+                MouseArea {
                     anchors.fill: parent
-                    anchors.leftMargin: 16; anchors.rightMargin: 16
-                    spacing: 16
-                    Column {
-                        anchors.verticalCenter: parent.verticalCenter
-                        spacing: 2
-                        Text { text: qsTr("账户余额"); font.pixelSize: Theme.fontSizeTiny; color: Theme.textSecondary }
-                        Row {
-                            spacing: 2
-                            Text { text: "\u{FFE5}"; font.pixelSize: Theme.fontSizeBase; color: Theme.textPrimary }
-                            Text {
-                                text: Number(profile.balance || 0).toFixed(2)
-                                font.pixelSize: Theme.fontSizeLarge; font.bold: true; color: Theme.textPrimary
-                            }
-                        }
-                    }
-                    Item { width: 1; height: 1 }
-                    Rectangle {
-                        anchors.verticalCenter: parent.verticalCenter; anchors.right: parent.right
-                        width: 96; height: 36; radius: 18; color: Theme.primary
-                        Text { anchors.centerIn: parent; text: qsTr("充值"); color: "#ffffff"; font.bold: true; font.pixelSize: Theme.fontSizeSmall }
-                        MouseArea { anchors.fill: parent; onClicked: rechargeDlg.open() }
-                    }
+                    onClicked: root.stackView.push("qrc:/UserClient/qml/pages/MemberCenterPage.qml")
                 }
             }
 
-            // 快捷统计：积分 / 优惠券 / 车辆
-            Row {
-                width: parent.width - 32
-                x: 16
-                height: 64
-                spacing: 12
-                StatCard { label: qsTr("积分"); value: String(profile.points || 0); onClicked: root.activeSheet = "points" }
-                StatCard { label: qsTr("优惠券"); value: String(couponsData.length); onClicked: root.activeSheet = "coupons" }
-                StatCard { label: qsTr("车辆"); value: String(vehiclesData.length); onClicked: root.activeSheet = "vehicles" }
-            }
-
-            // 充电画像
-            GroupCard {
-                title: qsTr("我的充电画像")
+            // ========== ③ 账户栏：余额 / 积分 / 优惠券 + 充值按钮 ==========
+            Rectangle {
+                width: parent.width - 32; x: 16
+                height: walletCol.implicitHeight + 20
+                color: Theme.card
+                radius: Theme.radiusSmall
+                border.color: Theme.border
                 Column {
-                    width: parent.width; spacing: 8
-                    PortraitRow { k: qsTr("月均充电次数"); v: Number(portrait.month_avg_count || 0).toFixed(1) + " 次" }
-                    PortraitRow { k: qsTr("平均单次充电量"); v: Number(portrait.avg_energy_kwh || 0).toFixed(1) + " kWh" }
-                    PortraitRow { k: qsTr("最常到访站"); v: portrait.favorite_station || "-" }
-                    PortraitRow { k: qsTr("常用时段"); v: portrait.usual_hours || "-" }
-                    PortraitRow { k: qsTr("偏好类型"); v: portrait.prefer_type || "-" }
-                }
-            }
-
-            // 功能入口
-            GroupCard {
-                title: qsTr("功能")
-                Column {
+                    id: walletCol
                     width: parent.width
-                    Repeater {
-                        model: [
-                            { label: qsTr("我的订单"), icon: "\u{1F5D2}", act: "orders" },
-                            { label: qsTr("我的优惠券"), icon: "\u{1F3AB}", act: "coupons" },
-                            { label: qsTr("我的车辆"), icon: "\u{1F697}", act: "vehicles" },
-                            { label: qsTr("积分明细"), icon: "\u{2B50}", act: "points" },
-                            { label: qsTr("客服与工单"), icon: "\u{1F4DE}", act: "service" },
-                            { label: qsTr("设置"), icon: "\u{2699}\u{FE0F}", act: "settings" }
-                        ]
-                        delegate: Rectangle {
-                            width: parent.width; height: 48
-                            color: "transparent"
-                            Row {
+                    anchors.left: parent.left; anchors.leftMargin: 14
+                    anchors.right: parent.right; anchors.rightMargin: 14
+                    anchors.top: parent.top; anchors.topMargin: 14
+                    spacing: 14
+                    // 标题
+                    Text { text: qsTr("我的账户"); font.pixelSize: Theme.fontSizeSmall + 1; font.bold: true; color: Theme.textPrimary }
+                    // 三张卡片 + 一个按钮
+                    Row {
+                        id: walletRow
+                        width: parent.width
+                        spacing: 8
+                        readonly property int cardW: (width - spacing * 3 - 88) / 3
+                        // 余额卡
+                        AccountCard {
+                            cardWidth: walletRow.cardW
+                            icon: "\u{1F4B3}"
+                            topLabel: qsTr("余额")
+                            amountText: "\u{FFE5}" + Number(profile.balance || 0).toFixed(2)
+                            subLabel: qsTr("点击充值")
+                            c: Theme.danger
+                            onClicked: rechargeDlg.open()
+                        }
+                        // 积分卡
+                        AccountCard {
+                            cardWidth: walletRow.cardW
+                            icon: "\u{2B50}"
+                            topLabel: qsTr("积分")
+                            amountText: String(profile.points || 0)
+                            subLabel: qsTr("查看明细")
+                            c: Theme.warn
+                            onClicked: root.stackView.push("qrc:/UserClient/qml/pages/PointsDetailPage.qml")
+                        }
+                        // 优惠券卡
+                        AccountCard {
+                            cardWidth: walletRow.cardW
+                            icon: "\u{1F3AB}"
+                            topLabel: qsTr("优惠券")
+                            amountText: String(couponsData.length)
+                            subLabel: qsTr("查看卡包")
+                            c: Theme.success
+                            onClicked: root.stackView.push("qrc:/UserClient/qml/pages/CouponDetailPage.qml")
+                        }
+                        // 充值按钮
+                        Rectangle {
+                            width: 88; height: 80; radius: Theme.radiusSmall
+                            color: Theme.primary
+                            Column {
+                                anchors.centerIn: parent
+                                spacing: 4
+                                Text {
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    text: "+"; color: "#ffffff"
+                                    font.pixelSize: 24; font.bold: true
+                                }
+                                Text {
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    text: qsTr("充值")
+                                    color: "#ffffff"
+                                    font.pixelSize: Theme.fontSizeSmall; font.bold: true
+                                }
+                            }
+                            MouseArea {
                                 anchors.fill: parent
-                                anchors.leftMargin: 4; anchors.rightMargin: 4
-                                spacing: 12
-                                Text { anchors.verticalCenter: parent.verticalCenter; text: modelData.icon; font.pixelSize: 20 }
-                                Text {
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: modelData.label
-                                    font.pixelSize: Theme.fontSizeBase; color: Theme.textPrimary
-                                }
-                                Item { width: 1; height: 1 }
-                                Text {
-                                    anchors.verticalCenter: parent.verticalCenter; anchors.right: parent.right
-                                    text: "›"; font.pixelSize: 22; color: Theme.textSecondary
-                                }
-                            }
-                            MouseArea { anchors.fill: parent; onClicked: root.onMenu(modelData.act) }
-                            Rectangle {
-                                anchors.bottom: parent.bottom; anchors.left: parent.left; anchors.right: parent.right
-                                height: 1; color: Theme.border
+                                onClicked: rechargeDlg.open()
                             }
                         }
                     }
                 }
             }
 
-            Text { width: parent.width - 32; x: 16; text: qsTr("余额/积分/订单均为示例数据，后续接入服务端"); color: Theme.textSecondary; font.pixelSize: Theme.fontSizeTiny; horizontalAlignment: Text.AlignHCenter }
-        }
-    }
-
-    // 右上角设置图标（保留原有入口，兼容旧习惯）
-    Text {
-        anchors.top: parent.top; anchors.right: parent.right
-        anchors.topMargin: 16; anchors.rightMargin: 16
-        text: "⚙️"; font.pixelSize: 24; color: "#ffffff"
-        MouseArea { anchors.fill: parent; onClicked: root.stackView.push("qrc:/UserClient/qml/pages/SettingsPage.qml") }
-    }
-
-    function onMenu(act) {
-        if (act === "orders")    root.stackView.push("qrc:/UserClient/qml/pages/OrderPage.qml")
-        else if (act === "vehicles") root.activeSheet = "vehicles"
-        else if (act === "coupons")  root.activeSheet = "coupons"
-        else if (act === "points")   root.activeSheet = "points"
-        else if (act === "settings") root.stackView.push("qrc:/UserClient/qml/pages/SettingsPage.qml")
-        else if (act === "service")  showToast(qsTr("客服与工单（增强）待接入"))
-    }
-
-    // —— 底部列表 sheet（车辆 / 优惠券 / 积分）——
-    Rectangle {
-        visible: activeSheet !== ""
-        anchors.fill: parent
-        z: 10
-        color: "#66000000"
-        MouseArea { anchors.fill: parent; onClicked: root.activeSheet = "" }
-    }
-    Rectangle {
-        visible: activeSheet !== ""
-        anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
-        height: root.height * 0.6
-        z: 11
-        color: Theme.background; radius: Theme.radius
-
-        Column {
-            anchors.fill: parent
-            anchors.margins: 16
-            spacing: 12
-
-            Row {
-                width: parent.width
-                Text {
-                    text: (activeSheet === "vehicles") ? qsTr("我的车辆")
-                        : (activeSheet === "coupons") ? qsTr("我的优惠券") : qsTr("积分明细")
-                    font.pixelSize: Theme.fontSizeTitle; font.bold: true; color: Theme.textPrimary
-                }
-                Item { width: 1; height: 1 }
-                Text {
-                    anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
-                    text: "✕"; font.pixelSize: 20; color: Theme.textSecondary
-                    MouseArea { anchors.fill: parent; onClicked: root.activeSheet = "" }
+            // ========== ④ 订单栏：全部订单 / 已预约 / 待支付 / 开发票 ==========
+            Rectangle {
+                width: parent.width - 32; x: 16
+                height: orderCol.implicitHeight + 20
+                color: Theme.card
+                radius: Theme.radiusSmall
+                border.color: Theme.border
+                Column {
+                    id: orderCol
+                    width: parent.width
+                    anchors.left: parent.left; anchors.leftMargin: 14
+                    anchors.right: parent.right; anchors.rightMargin: 14
+                    anchors.top: parent.top; anchors.topMargin: 14
+                    spacing: 14
+                    // 标题 + 查看全部
+                    Rectangle {
+                        width: parent.width
+                        height: orderTitleLbl.implicitHeight
+                        Text {
+                            id: orderTitleLbl
+                            anchors.left: parent.left
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: qsTr("我的订单"); font.pixelSize: Theme.fontSizeSmall + 1; font.bold: true; color: Theme.textPrimary
+                        }
+                        Text {
+                            id: orderAllLbl
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: qsTr("查看全部 ›")
+                            color: Theme.primary; font.pixelSize: Theme.fontSizeTiny; font.bold: true
+                            MouseArea {
+                                anchors.fill: parent; anchors.margins: -8
+                                onClicked: root.pushOrders("all")
+                            }
+                        }
+                    }
+                    // 四个入口
+                    Row {
+                        id: orderEntryRow
+                        width: parent.width
+                        spacing: 8
+                        readonly property int entryW: (width - spacing * 3) / 4
+                        OrderEntry {
+                            entryWidth: orderEntryRow.entryW
+                            icon: "\u{1F5D2}"
+                            label: qsTr("全部订单")
+                            onClicked: root.pushOrders("all")
+                        }
+                        OrderEntry {
+                            entryWidth: orderEntryRow.entryW
+                            icon: "\u{23F0}"
+                            label: qsTr("已预约")
+                            onClicked: root.pushOrders("reserved")
+                        }
+                        OrderEntry {
+                            entryWidth: orderEntryRow.entryW
+                            icon: "\u{1F4B0}"
+                            label: qsTr("待支付")
+                            badge: root.countStatus("pending_settle")
+                            onClicked: root.pushOrders("pending_settle")
+                        }
+                        OrderEntry {
+                            entryWidth: orderEntryRow.entryW
+                            icon: "\u{1F4C4}"
+                            label: qsTr("开发票")
+                            onClicked: root.stackView.push("qrc:/UserClient/qml/pages/InvoicePage.qml")
+                        }
+                    }
                 }
             }
 
-            ListView {
-                width: parent.width; height: parent.height - 64
-                clip: true
-                model: (activeSheet === "vehicles") ? vehiclesData
-                     : (activeSheet === "coupons") ? couponsData : pointsData
-
-                delegate: Rectangle {
-                    width: ListView.view.width
-                    height: (activeSheet === "vehicles") ? 64 : (activeSheet === "coupons") ? 72 : 40
-                    color: Theme.card; radius: Theme.radiusSmall; border.color: Theme.border
-
-                    // 车辆
-                    Loader {
-                        active: root.activeSheet === "vehicles"
-                        anchors.fill: parent; anchors.margins: 12
-                        sourceComponent: Component {
-                            Row {
-                                spacing: 12
-                                Text { anchors.verticalCenter: parent.verticalCenter; text: "\u{1F697}"; font.pixelSize: 22 }
-                                Column {
-                                    width: parent.width - 120
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    spacing: 2
-                                    Text { text: modelData.name || ""; font.bold: true; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeSmall }
-                                    Text { text: typeText(modelData.type) + " · " + (modelData.battery_kwh || 0) + " kWh · " + connText(modelData.connector_type); color: Theme.textSecondary; font.pixelSize: Theme.fontSizeTiny }
-                                }
-                                Text {
-                                    visible: !!modelData.is_default
-                                    anchors.verticalCenter: parent.verticalCenter; anchors.right: parent.right
-                                    text: qsTr("默认"); color: Theme.primary; font.pixelSize: Theme.fontSizeTiny; font.bold: true
-                                }
-                            }
-                        }
-                    }
-                    // 优惠券
-                    Loader {
-                        active: root.activeSheet === "coupons"
-                        anchors.fill: parent; anchors.margins: 12
-                        sourceComponent: Component {
-                            Row {
-                                spacing: 12
-                                Rectangle {
-                                    width: 44; height: 44; radius: Theme.radiusSmall
-                                    color: (modelData.status === "unused") ? Theme.primary : Theme.border
-                                    Text {
-                                        anchors.centerIn: parent
-                                        text: "\u{FFE5}" + (modelData.discount_amount || 0)
-                                        color: (modelData.status === "unused") ? "#ffffff" : Theme.textSecondary
-                                        font.bold: true; font.pixelSize: Theme.fontSizeBase
-                                    }
-                                }
-                                Column {
-                                    width: parent.width - 100
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    spacing: 2
-                                    Text { text: modelData.title || ""; font.bold: true; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeSmall }
-                                    Text { text: (modelData.scope || "") + " · " + (modelData.valid_until || ""); color: Theme.textSecondary; font.pixelSize: Theme.fontSizeTiny }
-                                }
-                                Text {
-                                    anchors.verticalCenter: parent.verticalCenter; anchors.right: parent.right
-                                    text: couponStatusText(modelData.status)
-                                    color: (modelData.status === "unused") ? Theme.success
-                                         : (modelData.status === "used") ? Theme.textSecondary : Theme.warn
-                                    font.pixelSize: Theme.fontSizeTiny; font.bold: true
-                                }
-                            }
-                        }
-                    }
-                    // 积分
-                    Loader {
-                        active: root.activeSheet === "points"
-                        anchors.fill: parent; anchors.margins: 8
-                        sourceComponent: Component {
-                            Row {
-                                spacing: 12
-                                Text {
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: (modelData.change >= 0 ? "+" : "") + (modelData.change || 0)
-                                    color: (modelData.change >= 0) ? Theme.success : Theme.danger
-                                    font.bold: true; font.pixelSize: Theme.fontSizeSmall
-                                }
-                                Text {
-                                    width: parent.width - 160
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: (modelData.reason === "charge") ? qsTr("充电获得") : qsTr("积分兑换")
-                                    color: Theme.textPrimary; font.pixelSize: Theme.fontSizeSmall
-                                }
-                                Text {
-                                    anchors.verticalCenter: parent.verticalCenter; anchors.right: parent.right
-                                    text: modelData.create_time || ""; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeTiny
-                                }
-                            }
-                        }
+            // ========== ⑤ 占位：充电画像 + 我的车辆（后续扩展） ==========
+            Rectangle {
+                width: parent.width - 32; x: 16
+                height: portraitCol.implicitHeight + 20
+                color: Theme.card
+                radius: Theme.radiusSmall
+                border.color: Theme.border
+                Column {
+                    id: portraitCol
+                    width: parent.width - 24
+                    anchors.left: parent.left; anchors.leftMargin: 12
+                    anchors.right: parent.right; anchors.rightMargin: 12
+                    anchors.top: parent.top; anchors.topMargin: 12
+                    spacing: 10
+                    Text { text: qsTr("充电画像 · 我的车辆"); font.pixelSize: Theme.fontSizeSmall + 1; font.bold: true; color: Theme.textPrimary }
+                    Text {
+                        text: qsTr("（待后续补充内容）")
+                        color: Theme.textSecondary; font.pixelSize: Theme.fontSizeTiny
                     }
                 }
+            }
+
+            // 底部说明（占位）
+            Text {
+                width: parent.width - 32; x: 16
+                text: qsTr("数据为示例，后续接入服务端实时同步")
+                color: Theme.textSecondary
+                font.pixelSize: Theme.fontSizeTiny
+                horizontalAlignment: Text.AlignHCenter
+                topPadding: 4
             }
         }
     }
 
-    // —— 充值弹窗 ——
+    // ========== 辅助：跳转订单页 ==========
+    function pushOrders(status) {
+        root.stackView.push("qrc:/UserClient/qml/pages/OrderPage.qml",
+                            { initialStatus: status })
+    }
+    function countStatus(s) {
+        var n = 0
+        var list = UserData.orders()
+        for (var i = 0; i < list.length; i++)
+            if (list[i].status === s) n++
+        return n
+    }
+
+    // ========== 充值弹窗（复用原有） ==========
     Dialog {
         id: rechargeDlg
         modal: true
@@ -433,130 +514,110 @@ Item {
         }
     }
 
-    // —— 改昵称弹窗 ——
-    Dialog {
-        id: nicknameDlg
-        modal: true
-        anchors.centerIn: Overlay.overlay
-        width: Math.min(320, Overlay.overlay ? Overlay.overlay.width - 64 : 320)
-        padding: 20
-        closePolicy: Popup.CloseOnEscape
-        background: Rectangle { radius: Theme.radius; color: Theme.card }
-
-        Column {
-            spacing: 16
-            Text { text: qsTr("修改昵称"); font.pixelSize: Theme.fontSizeTitle; font.bold: true; color: Theme.textPrimary }
-            Rectangle {
-                width: parent.width; height: 44
-                color: Theme.background; border.color: Theme.border; radius: Theme.radiusSmall
-                TextField {
-                    id: nicknameInput
-                    anchors.fill: parent; anchors.leftMargin: 12; anchors.rightMargin: 12
-                    text: profile.nickname || ""
-                    maximumLength: 20
-                    verticalAlignment: Text.AlignVCenter
-                    color: Theme.textPrimary
-                    background: Rectangle { color: "transparent" }
-                }
-            }
-            Row {
-                width: parent.width
-                spacing: 12
-                layoutDirection: Qt.RightToLeft
-                Button {
-                    text: qsTr("保存")
-                    onClicked: {
-                        if (UserData.updateNickname(nicknameInput.text)) {
-                            nicknameDlg.close()
-                            showToast(qsTr("昵称已更新"))
-                        } else {
-                            showToast(qsTr("昵称需 2–20 个字符"))
-                        }
-                    }
-                    background: Rectangle { radius: Theme.radiusSmall; color: Theme.primary }
-                    contentItem: Text { text: qsTr("保存"); color: "#ffffff"; font.bold: true; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
-                }
-                Button {
-                    text: qsTr("取消")
-                    onClicked: nicknameDlg.close()
-                    background: Rectangle { radius: Theme.radiusSmall; color: Theme.background; border.color: Theme.border }
-                    contentItem: Text { text: qsTr("取消"); color: Theme.textPrimary; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
-                }
-            }
-        }
-    }
-
     // 轻提示
     Rectangle {
-        id: toast
-        visible: false
+        id: toast; visible: false
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom; anchors.bottomMargin: 24
         width: Math.min(toastText.implicitWidth + 32, root.width - 48)
-        height: 40; radius: 20
-        color: "#B3000000"
-        z: 20
+        height: 40; radius: 20; color: "#B3000000"; z: 20
         Text { id: toastText; anchors.centerIn: parent; color: "#ffffff"; font.pixelSize: Theme.fontSizeSmall }
     }
     Timer { id: toastTimer; interval: 2000; onTriggered: toast.visible = false }
     function showToast(msg) { toastText.text = msg; toast.visible = true; toastTimer.restart() }
 
-    function typeText(t) {
-        if (t === "car") return qsTr("乘用车")
-        if (t === "light_truck") return qsTr("轻商")
-        if (t === "two_wheeler") return qsTr("两轮")
-        if (t === "three_wheeler") return qsTr("三轮")
-        return t
-    }
-    function connText(c) {
-        if (c === "ac_gb") return qsTr("国标交流")
-        if (c === "dc_gb") return qsTr("国标直流")
-        return qsTr("其他")
-    }
-    function couponStatusText(s) {
-        if (s === "unused") return qsTr("未使用")
-        if (s === "used") return qsTr("已使用")
-        if (s === "expired") return qsTr("已过期")
-        return s
+    // ========================= 复用组件 =========================
+
+    // 账户三卡：余额/积分/优惠券
+    component AccountCard: Rectangle {
+        id: ac
+        property int cardWidth: 100
+        property string icon
+        property string topLabel
+        property string amountText
+        property string subLabel
+        property color c: Theme.primary
+        signal clicked()
+
+        width: cardWidth; height: 80
+        radius: Theme.radiusSmall
+        color: c + "0D"
+        border.color: c + "33"
+        Column {
+            anchors.centerIn: ac
+            spacing: 3
+            Row {
+                anchors.horizontalCenter: parent.horizontalCenter
+                spacing: 4
+                Text { text: ac.icon || ""; font.pixelSize: 16 }
+                Text {
+                    text: ac.topLabel || ""
+                    color: Theme.textSecondary; font.pixelSize: Theme.fontSizeTiny
+                }
+            }
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: ac.amountText || ""
+                color: ac.c
+                font.pixelSize: Theme.fontSizeSmall + 1; font.bold: true
+                elide: Text.ElideMiddle; width: ac.width - 12
+                horizontalAlignment: Text.AlignHCenter
+            }
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: ac.subLabel || ""
+                color: Theme.textSecondary; font.pixelSize: 10
+            }
+        }
+        MouseArea { anchors.fill: ac; onClicked: ac.clicked() }
     }
 
-    // —— 复用小组件 ——
-    component StatCard: Rectangle {
+    // 订单入口 icon+label
+    component OrderEntry: Item {
+        id: oe
+        property int entryWidth: 100
+        property string icon
         property string label
-        property string value
+        property int badge: 0
         signal clicked()
-        Layout.fillWidth: true
-        width: (parent ? (parent.width - 24) / 3 : 100)
-        height: 64
-        color: Theme.card; radius: Theme.radiusSmall; border.color: Theme.border
+        width: entryWidth
+        height: col.implicitHeight
+
         Column {
-            anchors.centerIn: parent; spacing: 2
-            Text { anchors.horizontalCenter: parent.horizontalCenter; text: parent.parent.value; font.pixelSize: Theme.fontSizeTitle; font.bold: true; color: Theme.primary }
-            Text { anchors.horizontalCenter: parent.horizontalCenter; text: parent.parent.label; font.pixelSize: Theme.fontSizeTiny; color: Theme.textSecondary }
+            id: col
+            width: parent.width; spacing: 4
+            Rectangle {
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: 44; height: 44; radius: 22
+                color: Theme.primary + "10"
+                Text { anchors.centerIn: parent; text: oe.icon; font.pixelSize: 22 }
+                // 未支付红点徽标
+                Rectangle {
+                    visible: oe.badge > 0
+                    anchors.right: parent.right; anchors.top: parent.top
+                    anchors.rightMargin: -2; anchors.topMargin: -2
+                    height: 18
+                    width: Math.max(18, badgeTxt.implicitWidth + 8); radius: 9
+                    color: Theme.danger
+                    Text {
+                        id: badgeTxt; anchors.centerIn: parent
+                        text: (oe.badge > 99 ? "99+" : String(oe.badge))
+                        color: "#ffffff"; font.pixelSize: 10; font.bold: true
+                    }
+                }
+            }
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: oe.label
+                color: Theme.textPrimary; font.pixelSize: Theme.fontSizeTiny
+            }
         }
-        MouseArea { anchors.fill: parent; onClicked: parent.clicked() }
-    }
-    component GroupCard: Rectangle {
-        property string title
-        width: parent.width - 32
-        x: 16
-        height: cardCol.implicitHeight + 24
-        color: Theme.card; radius: Theme.radiusSmall; border.color: Theme.border
-        Column {
-            id: cardCol
-            width: parent.width - 24
-            anchors.left: parent.left; anchors.leftMargin: 12
-            anchors.top: parent.top; anchors.topMargin: 12
-            spacing: 8
-            Text { text: parent.parent.title; font.pixelSize: Theme.fontSizeSmall + 1; font.bold: true; color: Theme.textPrimary }
+
+        // 放大点击区域（不参与布局，避免 polish 递归）
+        MouseArea {
+            anchors.fill: parent
+            anchors.topMargin: -4; anchors.bottomMargin: -4
+            onClicked: oe.clicked()
         }
-    }
-    component PortraitRow: Row {
-        property string k
-        property string v
-        width: parent.width
-        spacing: 6
-        Text { text: parent.k + "："; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeTiny }
-        Text { text: parent.v; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeTiny; font.bold: true }
     }
 }

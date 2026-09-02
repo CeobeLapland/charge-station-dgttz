@@ -46,11 +46,26 @@ public:
     // —— 变更（示例阶段内存态，触发 profileChanged 刷新 UI）——
     Q_INVOKABLE bool recharge(double amount);
     Q_INVOKABLE bool updateNickname(const QString& nickname);
+    Q_INVOKABLE bool updateAvatar(const QString& avatarPath);
+
+    // —— 聚合：累计总用电量（kWh，来自已完成订单 energy_kwh 之和）——
+    Q_INVOKABLE double totalEnergyKwh() const;
+
+    // —— 会员套餐（member_plan 表）——
+    Q_INVOKABLE QVariantList memberPlans() const;
+
+    // —— 用户当前订阅（user_plan）——
+    Q_INVOKABLE QVariantMap currentPlan() const;
+
+    // —— 订阅会员套餐（示例：成功返回 true）——
+    Q_INVOKABLE bool subscribePlan(int planId);
 
 signals:
     void profileChanged();
 
 private:
     QString m_nickname;
+    QString m_avatarPath;
     double m_balance = 0.0;
+    int m_currentPlanId = 2;   // 当前订阅套餐 id（2=月卡）
 };
