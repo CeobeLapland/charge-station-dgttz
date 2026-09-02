@@ -39,6 +39,23 @@ QJsonArray& stationCache() {
             s.insert(QStringLiteral("latitude"), 39.90 + i * 0.02);
             s.insert(QStringLiteral("total_chargers"), 8 + (i % 3) * 2);
             s.insert(QStringLiteral("online_rate"), 82.0 + i * 3.5);
+            // ---- 以下字段对齐 server/sql/schema.sql 的 station 表 ----
+            s.insert(QStringLiteral("area"),
+                     QStringList{QStringLiteral("高新区"), QStringLiteral("市中心"),
+                                 QStringLiteral("软件园"), QStringLiteral("机场"),
+                                 QStringLiteral("商业区")}.at(i % 5));
+            s.insert(QStringLiteral("service_fee"), 0.4 + (i % 3) * 0.1);
+            s.insert(QStringLiteral("parking_fee"), (i % 4 == 0) ? 0.0 : 2.0);
+            s.insert(QStringLiteral("business_hours"), QStringLiteral("00:00-24:00"));
+            QStringList facilities{QStringLiteral("washroom")};
+            if (i % 2 == 0) facilities << QStringLiteral("wifi");
+            if (i != 1) facilities << QStringLiteral("convenience_store");
+            if (i % 3 == 0) facilities << QStringLiteral("rain_shelter");
+            s.insert(QStringLiteral("facilities"), QJsonArray::fromStringList(facilities));
+            s.insert(QStringLiteral("owner_type"),
+                     QStringList{QStringLiteral("self_run"), QStringLiteral("franchise"),
+                                 QStringLiteral("partner"), QStringLiteral("third_party")}.at(i % 4));
+            s.insert(QStringLiteral("has_swap"), (i == 3) ? 1 : 0);
             arr.append(s);
         }
         return arr;
@@ -82,6 +99,19 @@ QJsonArray& chargerCache() {
                 c.insert(QStringLiteral("health_score"), qMax(45, 100 - (id % 40)));
                 c.insert(QStringLiteral("total_charge_count"), (id * 37) % 500);
                 c.insert(QStringLiteral("total_charge_duration"), (id * 53) % 8000);
+                // ---- 实时电气参数/故障码，对齐 server/sql/schema.sql 的 charger 表 ----
+                double voltage = 0.0, current = 0.0;
+                if (status == QStringLiteral("charging")) {
+                    voltage = fast ? 500.0 + (id % 10) * 10.0 : 220.0;
+                    current = fast ? 60.0 + (id % 30) : 16.0 + (id % 16);
+                }
+                c.insert(QStringLiteral("voltage"), voltage);
+                c.insert(QStringLiteral("current"), current);
+                c.insert(QStringLiteral("fault_code"),
+                         status == QStringLiteral("fault")
+                             ? QStringLiteral("E-%1").arg(300 + (id % 90), 4, 10, QChar('0'))
+                             : QString());
+                c.insert(QStringLiteral("created_time"), dateOffset(30 + (id % 400)));
                 arr.append(c);
                 ++id;
             }
@@ -114,6 +144,9 @@ QJsonArray& userCache() {
             u.insert(QStringLiteral("status"),
                      (i == 5) ? QStringLiteral("frozen") : QStringLiteral("normal"));
             u.insert(QStringLiteral("register_time"), dateOffset(30 - i * 4));
+            u.insert(QStringLiteral("avatar_path"), QString());
+            u.insert(QStringLiteral("last_login_time"),
+                     dateOffset(i) + QStringLiteral(" 21:%1:00").arg(10 + i, 2, 10, QChar('0')));
             arr.append(u);
         }
         return arr;
