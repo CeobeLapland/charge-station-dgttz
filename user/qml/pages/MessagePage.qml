@@ -105,11 +105,14 @@ Item {
                     anchors.top: parent.top; anchors.topMargin: 10
                     spacing: 6
 
-                    // 图标 + 标题 + 时间
-                    Row {
+                    // 图标 + 标题 + 时间（不用 Row，避免子项 anchors.right 违规）
+                    Rectangle {
                         width: parent.width
-                        spacing: 8
+                        height: Math.max(iconR.height, msgTitleCol.implicitHeight, msgTimeLbl.implicitHeight)
+                        // 左：图标
                         Rectangle {
+                            id: iconR
+                            anchors.left: parent.left
                             width: 34; height: 34; radius: 17
                             color: root.typeColor(modelData.type) + "1A"
                             Text {
@@ -118,11 +121,22 @@ Item {
                                 font.pixelSize: 17
                             }
                         }
+                        // 右：时间
+                        Text {
+                            id: msgTimeLbl
+                            anchors.right: parent.right
+                            text: modelData.create_time || ""
+                            color: Theme.textSecondary; font.pixelSize: Theme.fontSizeTiny
+                            anchors.baseline: msgTitleText.baseline
+                        }
+                        // 中间：标题文字列
                         Column {
-                            width: parent.width - 44 - 60
-                            anchors.verticalCenter: parent.verticalCenter
+                            id: msgTitleCol
+                            anchors.left: iconR.right; anchors.leftMargin: 8
+                            anchors.right: msgTimeLbl.left; anchors.rightMargin: 8
                             spacing: 2
                             Text {
+                                id: msgTitleText
                                 width: parent.width
                                 text: modelData.title || ""
                                 font.pixelSize: Theme.fontSizeSmall + 1
@@ -130,11 +144,6 @@ Item {
                                 color: Theme.textPrimary
                                 elide: Text.ElideRight
                             }
-                        }
-                        Text {
-                            anchors.verticalCenter: parent.verticalCenter; anchors.right: parent.right
-                            text: modelData.create_time || ""
-                            color: Theme.textSecondary; font.pixelSize: Theme.fontSizeTiny
                         }
                     }
 

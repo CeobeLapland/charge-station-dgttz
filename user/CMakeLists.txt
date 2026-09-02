@@ -45,6 +45,11 @@ qt_add_executable(charge_user_client
     qml/pages/ProfilePage.qml
     qml/pages/OrderPage.qml
     qml/pages/SettingsPage.qml
+    qml/pages/EditProfilePage.qml
+    qml/pages/MemberCenterPage.qml
+    qml/pages/PointsDetailPage.qml
+    qml/pages/CouponDetailPage.qml
+    qml/pages/InvoicePage.qml
     qml/components/BottomNav.qml
     qml/components/ConfirmDialog.qml
     qml/map/explore_map.qrc
@@ -68,6 +73,11 @@ qt_add_qml_module(charge_user_client
         qml/pages/ProfilePage.qml
         qml/pages/OrderPage.qml
         qml/pages/SettingsPage.qml
+        qml/pages/EditProfilePage.qml
+        qml/pages/MemberCenterPage.qml
+        qml/pages/PointsDetailPage.qml
+        qml/pages/CouponDetailPage.qml
+        qml/pages/InvoicePage.qml
         qml/components/BottomNav.qml
         qml/components/ConfirmDialog.qml
     RESOURCES
