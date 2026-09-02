@@ -67,10 +67,35 @@ Item {
     Text {
         anchors.top: parent.top; anchors.topMargin: 28
         anchors.left: parent.left; anchors.leftMargin: 64
-        anchors.right: parent.right; anchors.rightMargin: 16
+        anchors.right: parent.right; anchors.rightMargin: 64
         text: qsTr("电站详情")
         elide: Text.ElideRight
         font.pixelSize: Theme.fontSizeTitle; font.bold: true; color: Theme.textPrimary
+    }
+
+    // 收藏按钮（右上角，点击收藏/取消）
+    property bool isFavorite: false
+    function refreshFav() { root.isFavorite = UserData.isFavorite(stationId) }
+    Component.onCompleted: refreshFav()
+    Connections { target: UserData; function onFavoritesChanged() { refreshFav() } }
+    Rectangle {
+        anchors.top: parent.top; anchors.topMargin: 18
+        anchors.right: parent.right; anchors.rightMargin: 16
+        width: 40; height: 40; radius: 20
+        color: Theme.card; border.color: Theme.border; border.width: 1
+        Text {
+            anchors.centerIn: parent
+            text: root.isFavorite ? "\u{2764}" : "\u{2661}"
+            color: root.isFavorite ? "#F04438" : Theme.textSecondary
+            font.pixelSize: 22
+        }
+        MouseArea {
+            anchors.fill: parent
+            onClicked: {
+                var on = UserData.toggleFavorite(stationId)
+                showToast(on ? qsTr("已收藏该电站") : qsTr("已取消收藏"))
+            }
+        }
     }
 
     // 顶部渐变装饰
