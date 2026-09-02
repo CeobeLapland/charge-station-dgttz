@@ -1,0 +1,9 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+    <!-- 探索页地图资源：HTML + MapLibre JS/CSS 全部打包，避免 CDN 网络依赖 -->
+    <qresource prefix="/UserClient/qml/map">
+        <file alias="explore_map.html">explore_map.html</file>
+        <file alias="lib/maplibre-gl.js">lib/maplibre-gl.js</file>
+        <file alias="lib/maplibre-gl.css">lib/maplibre-gl.css</file>
+    </qresource>
+</RCC>
