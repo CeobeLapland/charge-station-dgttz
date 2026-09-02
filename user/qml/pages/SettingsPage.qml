@@ -67,17 +67,18 @@ Item {
             // —— 主题风格选择（沿用已有 techBlue / minimalDark / springGreen，供顺手操作）——
             SectionCard { title: qsTr("主题风格") }
             ComboBox {
+                id: themeCombo
                 width: parent.width
                 model: ["techBlue", "minimalDark", "springGreen"]
                 currentIndex: Math.max(0, model.indexOf(Theme.styleName))
                 background: Rectangle { color: Theme.card; border.color: Theme.border; border.width: 1; radius: Theme.radiusSmall }
                 contentItem: Text {
-                    text: control.displayText
+                    text: themeCombo.displayText
                     color: Theme.textPrimary
                     font.pixelSize: Theme.fontSizeBase
                     leftPadding: 12; verticalAlignment: Text.AlignVCenter
                 }
-                onActivated: function (idx) { Theme.styleName = control.model[idx] }
+                onActivated: function (idx) { Theme.styleName = themeCombo.model[idx] }
             }
 
             // —— 地图瓦片源选择 ——
@@ -90,14 +91,14 @@ Item {
                 currentIndex: root.presetIndex
                 background: Rectangle { color: Theme.card; border.color: Theme.border; border.width: 1; radius: Theme.radiusSmall }
                 contentItem: Text {
-                    text: control.displayText
+                    text: tileSourceCombo.displayText
                     color: Theme.textPrimary
                     font.pixelSize: Theme.fontSizeBase
                     leftPadding: 12; verticalAlignment: Text.AlignVCenter
                 }
                 onActivated: function (idx) {
-                    var id = root.presets[idx].id
-                    authStore.mapTileSource = id
+                    var presetId = root.presets[idx].id
+                    authStore.mapTileSource = presetId
                 }
             }
 
