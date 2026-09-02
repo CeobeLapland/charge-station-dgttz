@@ -32,6 +32,8 @@ qt_add_executable(charge_user_client
     src/ExploreData.cpp
     src/UserData.h
     src/UserData.cpp
+    src/ChatData.h
+    src/ChatData.cpp
     qml/Main.qml
     qml/pages/LoginPage.qml
     qml/pages/RegisterPage.qml
@@ -42,6 +44,7 @@ qt_add_executable(charge_user_client
     qml/pages/ExplorePage.qml
     qml/pages/StationDetailPage.qml
     qml/pages/MessagePage.qml
+    qml/pages/ChatPage.qml
     qml/pages/ProfilePage.qml
     qml/pages/OrderPage.qml
     qml/pages/SettingsPage.qml
@@ -50,6 +53,11 @@ qt_add_executable(charge_user_client
     qml/pages/PointsDetailPage.qml
     qml/pages/CouponDetailPage.qml
     qml/pages/InvoicePage.qml
+    qml/pages/MyFavoritesPage.qml
+    qml/pages/MyReviewsPage.qml
+    qml/pages/VehicleDetailPage.qml
+    qml/pages/VehicleFormPage.qml
+    qml/pages/UserPortraitPage.qml
     qml/components/BottomNav.qml
     qml/components/ConfirmDialog.qml
     qml/map/explore_map.qrc
@@ -70,6 +78,7 @@ qt_add_qml_module(charge_user_client
         qml/pages/ExplorePage.qml
         qml/pages/StationDetailPage.qml
         qml/pages/MessagePage.qml
+        qml/pages/ChatPage.qml
         qml/pages/ProfilePage.qml
         qml/pages/OrderPage.qml
         qml/pages/SettingsPage.qml
@@ -78,6 +87,11 @@ qt_add_qml_module(charge_user_client
         qml/pages/PointsDetailPage.qml
         qml/pages/CouponDetailPage.qml
         qml/pages/InvoicePage.qml
+        qml/pages/MyFavoritesPage.qml
+        qml/pages/MyReviewsPage.qml
+        qml/pages/VehicleDetailPage.qml
+        qml/pages/VehicleFormPage.qml
+        qml/pages/UserPortraitPage.qml
         qml/components/BottomNav.qml
         qml/components/ConfirmDialog.qml
     RESOURCES

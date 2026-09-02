@@ -23,9 +23,24 @@ Item {
     readonly property double totalKwh: UserData.totalEnergyKwh()
     readonly property var curPlan: UserData.currentPlan()
 
+    // 车辆横向栏卡片模型（车辆卡 + 末尾 "+" 添加卡）
+    property var vehicleCards: []
+    function rebuildVehicleCards() {
+        var vs = UserData.vehicles()
+        var out = []
+        for (var i = 0; i < vs.length; i++) {
+            var m = vs[i]
+            m.isAdd = false
+            out.push(m)
+        }
+        out.push({ isAdd: true })
+        root.vehicleCards = out
+    }
+
     function refresh() { root.profile = UserData.profile() }
-    Component.onCompleted: refresh()
+    Component.onCompleted: { refresh(); rebuildVehicleCards() }
     Connections { target: UserData; function onProfileChanged() { refresh() } }
+    Connections { target: UserData; function onVehiclesChanged() { rebuildVehicleCards() } }
 
     function levelText(lv) {
         if (lv === "vip") return qsTr("VIP 会员")
@@ -391,25 +406,143 @@ Item {
                 }
             }
 
-            // ========== ⑤ 占位：充电画像 + 我的车辆（后续扩展） ==========
+            // ========== ⑤ 收藏 / 评论 ==========
             Rectangle {
                 width: parent.width - 32; x: 16
-                height: portraitCol.implicitHeight + 20
+                height: favComCol.implicitHeight + 20
                 color: Theme.card
                 radius: Theme.radiusSmall
                 border.color: Theme.border
                 Column {
-                    id: portraitCol
+                    id: favComCol
                     width: parent.width - 24
                     anchors.left: parent.left; anchors.leftMargin: 12
                     anchors.right: parent.right; anchors.rightMargin: 12
-                    anchors.top: parent.top; anchors.topMargin: 12
-                    spacing: 10
-                    Text { text: qsTr("充电画像 · 我的车辆"); font.pixelSize: Theme.fontSizeSmall + 1; font.bold: true; color: Theme.textPrimary }
-                    Text {
-                        text: qsTr("（待后续补充内容）")
-                        color: Theme.textSecondary; font.pixelSize: Theme.fontSizeTiny
+                    anchors.top: parent.top; anchors.topMargin: 14
+                    spacing: 12
+                    Text { text: qsTr("互动足迹"); font.pixelSize: Theme.fontSizeSmall + 1; font.bold: true; color: Theme.textPrimary }
+                    Row {
+                        width: parent.width
+                        spacing: 8
+                        readonly property int halfW: (width - spacing) / 2
+                        SideEntry {
+                            entryWidth: parent.halfW
+                            icon: "\u{2764}\u{FE0F}"
+                            iconColor: "#F04438"
+                            label: qsTr("我的收藏")
+                            sub: qsTr("喜欢的电站")
+                            onClicked: root.stackView.push("qrc:/UserClient/qml/pages/MyFavoritesPage.qml")
+                        }
+                        SideEntry {
+                            entryWidth: parent.halfW
+                            icon: "\u{1F4AC}"
+                            iconColor: "#0E7DFF"
+                            label: qsTr("我的评论")
+                            sub: qsTr("去过都说好")
+                            onClicked: root.stackView.push("qrc:/UserClient/qml/pages/MyReviewsPage.qml")
+                        }
                     }
+                }
+            }
+
+            // ========== ⑥ 我的车辆（横向滑动栏） ==========
+            Rectangle {
+                width: parent.width - 32; x: 16
+                height: vehicleCardCol.implicitHeight + 20
+                color: Theme.card
+                radius: Theme.radiusSmall
+                border.color: Theme.border
+                Column {
+                    id: vehicleCardCol
+                    width: parent.width - 24
+                    anchors.left: parent.left; anchors.leftMargin: 12
+                    anchors.right: parent.right; anchors.rightMargin: 12
+                    anchors.top: parent.top; anchors.topMargin: 14
+                    spacing: 12
+                    // 标题 + 车辆数
+                    Rectangle {
+                        width: parent.width
+                        height: Math.max(titleTxt.implicitHeight, cntTxt.implicitHeight)
+                        Text {
+                            id: titleTxt
+                            anchors.left: parent.left
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: qsTr("我的车辆")
+                            font.pixelSize: Theme.fontSizeSmall + 1; font.bold: true; color: Theme.textPrimary
+                        }
+                        Text {
+                            id: cntTxt
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: qsTr("共 ") + root.vehicleCards.length + qsTr(" 辆（左右滑动）")
+                            color: Theme.textSecondary; font.pixelSize: Theme.fontSizeTiny
+                        }
+                    }
+                    // 横向车辆卡
+                    ListView {
+                        id: vehicleList
+                        width: parent.width
+                        height: 128
+                        orientation: ListView.Horizontal
+                        spacing: 10
+                        clip: true
+                        model: root.vehicleCards
+                        delegate: VehicleCard {
+                            width: 168
+                            v: modelData
+                            onEditClicked: {
+                                if (modelData.isAdd)
+                                    root.stackView.push("qrc:/UserClient/qml/pages/VehicleFormPage.qml", { vehicleId: 0 })
+                                else
+                                    root.stackView.push("qrc:/UserClient/qml/pages/VehicleDetailPage.qml", { vehicleId: modelData.id })
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ========== ⑦ 用户画像 ==========
+            Rectangle {
+                width: parent.width - 32; x: 16
+                height: portraitEntry.implicitHeight + 60
+                color: Theme.card
+                radius: Theme.radiusSmall
+                border.color: Theme.border
+                Rectangle {
+                    id: portraitEntry
+                    anchors.fill: parent
+                    anchors.leftMargin: 16; anchors.rightMargin: 16
+                    Text {
+                        id: ptIcon
+                        anchors.left: parent.left
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "\u{1F3C6}"; font.pixelSize: 30
+                    }
+                    Text {
+                        id: ptArrow
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "›"; color: Theme.textSecondary; font.pixelSize: 26
+                    }
+                    Column {
+                        anchors.left: ptIcon.right; anchors.leftMargin: 12
+                        anchors.right: ptArrow.left; anchors.rightMargin: 12
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: 3
+                        Text {
+                            text: qsTr("充电画像 / 年度报告")
+                            color: Theme.textPrimary; font.pixelSize: Theme.fontSizeSmall; font.bold: true
+                        }
+                        Text {
+                            text: qsTr("看看这一年你充了多少电、省了多少钱")
+                            color: Theme.textSecondary; font.pixelSize: Theme.fontSizeTiny
+                            elide: Text.ElideRight; width: parent.width
+                        }
+                    }
+                }
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: root.stackView.push("qrc:/UserClient/qml/pages/UserPortraitPage.qml")
                 }
             }
 
@@ -618,6 +751,136 @@ Item {
             anchors.fill: parent
             anchors.topMargin: -4; anchors.bottomMargin: -4
             onClicked: oe.clicked()
+        }
+    }
+
+    // 收藏/评论 半宽入口（icon + label + sub）
+    component SideEntry: Item {
+        id: se
+        property int entryWidth: 140
+        property string icon
+        property color iconColor: Theme.primary
+        property string label
+        property string sub
+        signal clicked()
+        width: entryWidth
+        height: col.implicitHeight
+        Rectangle {
+            anchors.fill: parent
+            anchors.margins: -6
+            color: Theme.primary + "08"
+            radius: Theme.radiusSmall
+        }
+        Column {
+            id: col
+            anchors.centerIn: parent
+            spacing: 3
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: se.icon; font.pixelSize: 22
+            }
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: se.label; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeSmall; font.bold: true
+            }
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: se.sub; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeTiny
+            }
+        }
+        MouseArea { anchors.fill: parent; anchors.margins: -6; onClicked: se.clicked() }
+    }
+
+    // 车辆卡（VehicleCard：真正车辆 / "+" 添加卡）
+    component VehicleCard: Item {
+        id: vc
+        property var v: ({})
+        readonly property int vehWidth: 168
+        readonly property int vehHeight: 128
+        signal editClicked()
+        width: vehWidth
+        height: vehHeight
+
+        Rectangle {
+            anchors.fill: parent
+            radius: Theme.radiusSmall
+            border.color: vc.v.isAdd ? Theme.primary : Theme.border
+            color: vc.v.isAdd ? Theme.primary + "10" : Theme.card
+        }
+
+        // 添加卡
+        Column {
+            visible: !!vc.v.isAdd
+            anchors.centerIn: parent
+            spacing: 6
+            Rectangle {
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: 40; height: 40; radius: 20; color: Theme.primary
+                Text { anchors.centerIn: parent; text: "+"; color: "#ffffff"; font.pixelSize: 26; font.bold: true }
+            }
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: qsTr("添加车辆"); color: Theme.primary; font.pixelSize: Theme.fontSizeSmall; font.bold: true
+            }
+        }
+
+        // 车辆卡内容
+        Column {
+            visible: !vc.v.isAdd
+            width: parent.width - 16
+            anchors.left: parent.left; anchors.leftMargin: 8
+            anchors.right: parent.right; anchors.rightMargin: 8
+            anchors.top: parent.top; anchors.topMargin: 12
+            spacing: 5
+            Text {
+                width: parent.width
+                text: vc.vehicleTypeIcon(vc.v.type || "car")
+                font.pixelSize: 30
+            }
+            Text {
+                width: parent.width
+                text: vc.v.name || qsTr("未知车辆")
+                color: Theme.textPrimary; font.pixelSize: Theme.fontSizeSmall; font.bold: true
+                elide: Text.ElideRight; wrapMode: Text.NoWrap
+            }
+            Text {
+                width: parent.width
+                text: vc.vehicleTypeLabel(vc.v.type || "") + " · " + (vc.v.battery_kwh || 0) + " kWh"
+                color: Theme.textSecondary; font.pixelSize: Theme.fontSizeTiny
+                elide: Text.ElideRight; wrapMode: Text.NoWrap
+            }
+            Rectangle {
+                visible: Number(vc.v.is_default) === 1
+                height: 16; width: 52; radius: 8; color: Theme.warn + "22"
+                Text {
+                    anchors.centerIn: parent
+                    text: qsTr("默认"); color: Theme.warn; font.pixelSize: 9; font.bold: true
+                }
+            }
+        }
+
+        Text {
+            visible: !vc.v.isAdd
+            anchors.right: parent.right; anchors.rightMargin: 8
+            anchors.top: parent.top; anchors.topMargin: 8
+            text: "›"; color: Theme.textSecondary; font.pixelSize: 18
+        }
+
+        MouseArea { anchors.fill: parent; onClicked: vc.editClicked() }
+
+        function vehicleTypeLabel(t) {
+            if (t === "car") return qsTr("小汽车")
+            if (t === "light_truck") return qsTr("微型货车")
+            if (t === "two_wheeler") return qsTr("两轮电动")
+            if (t === "three_wheeler") return qsTr("三轮电动")
+            return t
+        }
+        function vehicleTypeIcon(t) {
+            if (t === "car") return "\u{1F697}"
+            if (t === "light_truck") return "\u{1F69A}"
+            if (t === "two_wheeler") return "\u{1F6B5}"
+            if (t === "three_wheeler") return "\u{1F6F4}"
+            return "\u{1F697}"
         }
     }
 }

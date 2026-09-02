@@ -60,12 +60,30 @@ public:
     // —— 订阅会员套餐（示例：成功返回 true）——
     Q_INVOKABLE bool subscribePlan(int planId);
 
+    // —— 我的收藏（favorite：user 收藏 station）——
+    Q_INVOKABLE QVariantList favorites() const;          // [{station_id, create_time}, ...]
+    Q_INVOKABLE bool isFavorite(int stationId) const;
+    Q_INVOKABLE bool toggleFavorite(int stationId);      // 收藏/取消收藏，返回切换后是否收藏
+
+    // —— 我的评论（review：用户发过的评价，社区/评价功能占位）——
+    Q_INVOKABLE QVariantList myReviews() const;
+
+    // —— 我的车辆变更（vehicle，示例内存态）——
+    Q_INVOKABLE int addVehicle(const QVariantMap& v);     // 新增，成功返回新 id，失败 -1
+    Q_INVOKABLE bool updateVehicle(int vehicleId, const QVariantMap& v);
+    Q_INVOKABLE bool removeVehicle(int vehicleId);
+
 signals:
     void profileChanged();
+    void favoritesChanged();
+    void vehiclesChanged();
 
 private:
     QString m_nickname;
     QString m_avatarPath;
     double m_balance = 0.0;
     int m_currentPlanId = 2;   // 当前订阅套餐 id（2=月卡）
+    // 内部可变态（示例阶段内存）：车辆列表与收藏列表
+    QList<QVariantMap> m_vehicles;
+    QList<QVariantMap> m_favorites;   // {station_id, create_time}
 };

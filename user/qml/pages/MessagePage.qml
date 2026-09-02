@@ -2,44 +2,32 @@ import QtQuick
 import QtQuick.Controls
 import UserClient
 
-// 消息页：站内通知列表（notification）。数据来自 UserData.notifications()，未读消息以圆点/加粗区分。
+// 消息页：仿微信/QQ 的会话列表。每个卡片 = 一个会话（按消息类型聚合），
+// 预览最近一条消息，点击进入聊天详情（ChatPage），长按卡片可清空该会话历史。
 Item {
     id: root
     property int navIndex: 2
     readonly property var stackView: StackView.view
-    readonly property var items: UserData.notifications()
 
-    function typeText(t) {
-        if (t === "reservation") return qsTr("预约")
-        if (t === "order")       return qsTr("订单")
-        if (t === "point")       return qsTr("积分")
-        if (t === "coupon")      return qsTr("优惠券")
-        if (t === "work_order")  return qsTr("工单")
-        if (t === "system")      return qsTr("系统")
-        return qsTr("通知")
+    // 会话模型（由 ChatData 数据重建，订阅 dataChanged 保持同步）
+    ListModel { id: convModel }
+
+    function reload() {
+        convModel.clear()
+        var list = ChatData.conversations()
+        for (var i = 0; i < list.length; i++)
+            convModel.append(list[i])
+        unreadLbl.text = ChatData.unreadTotal() > 0
+                        ? qsTr("未读 ") + ChatData.unreadTotal()
+                        : qsTr("全部已读")
     }
-    function typeIcon(t) {
-        if (t === "reservation") return "\u{23F0}"
-        if (t === "order")       return "\u{1F50C}"
-        if (t === "point")       return "\u{2B50}"
-        if (t === "coupon")      return "\u{1F3AB}"
-        if (t === "work_order")  return "\u{1F527}"
-        if (t === "system")      return "\u{1F4E2}"
-        return "\u{1F514}"
+
+    Connections {
+        target: ChatData
+        function onDataChanged() { root.reload() }
     }
-    function typeColor(t) {
-        if (t === "point" || t === "coupon") return Theme.accent
-        if (t === "work_order") return Theme.warn
-        if (t === "system")     return Theme.textSecondary
-        return Theme.primary
-    }
-    function isUnread(it) { return Number(it.is_read || 0) === 0 }
-    function unreadCount() {
-        var n = 0
-        for (var i = 0; i < items.length; i++)
-            if (isUnread(items[i])) n++
-        return n
-    }
+
+    Component.onCompleted: root.reload()
 
     // 不透明背景
     Rectangle { anchors.fill: parent; color: Theme.background }
@@ -64,107 +52,103 @@ Item {
                 }
                 Item { width: 1; height: 1 }
                 Text {
+                    id: unreadLbl
                     anchors.verticalCenter: parent.verticalCenter; anchors.right: parent.right
-                    text: root.unreadCount() > 0 ? (qsTr("未读 ") + root.unreadCount()) : qsTr("全部已读")
                     color: "#ffffff"; font.pixelSize: Theme.fontSizeSmall
                 }
             }
         }
 
-        // 列表
+        // 会话列表
         ListView {
             id: listView
             width: parent.width
             height: parent.height - 72
             clip: true
-            model: root.items
+            model: convModel
             spacing: 10
-            topMargin: 12
-            bottomMargin: 16
-
+            topMargin: 8
+            bottomMargin: 12
             delegate: Rectangle {
-                width: listView.width - 32
-                x: 16
-                height: msgCol.implicitHeight + 20
+                width: listView.width - 24
+                height: 84
+                x: 12
                 color: Theme.card
-                radius: Theme.radiusSmall
                 border.color: Theme.border
+                border.width: 1
+                radius: Theme.radiusSmall
 
-                // 未读圆点
+                // 头像（彩色圆底 + emoji）
                 Rectangle {
-                    visible: root.isUnread(modelData)
-                    anchors.left: parent.left; anchors.top: parent.top
-                    anchors.leftMargin: 8; anchors.topMargin: 10
-                    width: 8; height: 8; radius: 4; color: Theme.danger
+                    id: avatar
+                    anchors.left: parent.left; anchors.leftMargin: 12
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 52; height: 52; radius: 26
+                    color: model.color + "1A"
+                    border.color: model.color
+                    border.width: 1
+                    Text {
+                        anchors.centerIn: parent
+                        text: model.icon
+                        font.pixelSize: 24
+                    }
                 }
 
-                Column {
-                    id: msgCol
-                    width: parent.width - 24
-                    anchors.left: parent.left; anchors.leftMargin: 12
-                    anchors.top: parent.top; anchors.topMargin: 10
-                    spacing: 6
-
-                    // 图标 + 标题 + 时间（不用 Row，避免子项 anchors.right 违规）
-                    Rectangle {
-                        width: parent.width
-                        height: Math.max(iconR.height, msgTitleCol.implicitHeight, msgTimeLbl.implicitHeight)
-                        // 左：图标
-                        Rectangle {
-                            id: iconR
-                            anchors.left: parent.left
-                            width: 34; height: 34; radius: 17
-                            color: root.typeColor(modelData.type) + "1A"
-                            Text {
-                                anchors.centerIn: parent
-                                text: root.typeIcon(modelData.type)
-                                font.pixelSize: 17
-                            }
-                        }
-                        // 右：时间
-                        Text {
-                            id: msgTimeLbl
-                            anchors.right: parent.right
-                            text: modelData.create_time || ""
-                            color: Theme.textSecondary; font.pixelSize: Theme.fontSizeTiny
-                            anchors.baseline: msgTitleText.baseline
-                        }
-                        // 中间：标题文字列
-                        Column {
-                            id: msgTitleCol
-                            anchors.left: iconR.right; anchors.leftMargin: 8
-                            anchors.right: msgTimeLbl.left; anchors.rightMargin: 8
-                            spacing: 2
-                            Text {
-                                id: msgTitleText
-                                width: parent.width
-                                text: modelData.title || ""
-                                font.pixelSize: Theme.fontSizeSmall + 1
-                                font.bold: root.isUnread(modelData)
-                                color: Theme.textPrimary
-                                elide: Text.ElideRight
-                            }
-                        }
-                    }
-
-                    // 内容
+                // 未读角标
+                Rectangle {
+                    visible: Number(model.unread) > 0
+                    anchors.left: avatar.right; anchors.top: avatar.top
+                    anchors.leftMargin: -12; anchors.topMargin: -6
+                    width: Math.max(20, unreadTxt.implicitWidth + 12)
+                    height: 20; radius: 10
+                    color: Theme.danger
                     Text {
-                        width: parent.width
-                        text: modelData.content || ""
-                        color: Theme.textSecondary
-                        font.pixelSize: Theme.fontSizeSmall
-                        wrapMode: Text.Wrap
-                        maximumLineCount: 2
-                        elide: Text.ElideRight
+                        id: unreadTxt
+                        anchors.centerIn: parent
+                        text: Number(model.unread) > 99 ? "99+" : model.unread
+                        color: "#ffffff"; font.pixelSize: Theme.fontSizeTiny; font.bold: true
                     }
+                }
 
-                    // 类型标签
-                    Text {
-                        text: root.typeText(modelData.type)
-                        color: root.typeColor(modelData.type)
-                        font.pixelSize: Theme.fontSizeTiny
-                        font.bold: true
+                // 标题
+                Text {
+                    id: titleText
+                    anchors.left: avatar.right; anchors.leftMargin: 12
+                    anchors.top: parent.top; anchors.topMargin: 16
+                    text: model.title
+                    color: Theme.textPrimary; font.pixelSize: Theme.fontSizeBase; font.bold: true
+                }
+
+                // 时间
+                Text {
+                    anchors.right: parent.right; anchors.rightMargin: 12
+                    anchors.baseline: titleText.baseline
+                    text: model.last_time || ""
+                    color: Theme.textSecondary; font.pixelSize: Theme.fontSizeTiny
+                }
+
+                // 最近消息预览
+                Text {
+                    anchors.left: avatar.right; anchors.leftMargin: 12
+                    anchors.top: titleText.bottom; anchors.topMargin: 7
+                    anchors.right: parent.right; anchors.rightMargin: 12
+                    text: model.last_dir === "out"
+                          ? qsTr("我：") + (model.last_content || "")
+                          : model.last_content || ""
+                    color: Theme.textSecondary; font.pixelSize: Theme.fontSizeSmall
+                    elide: Text.ElideRight
+                    maximumLineCount: 1
+                }
+
+                // 点击进入聊天 / 长按清空会话
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: {
+                        ChatData.markRead(model.id)
+                        root.stackView.push("qrc:/UserClient/qml/pages/ChatPage.qml",
+                                            { conversationId: model.id })
                     }
+                    onPressAndHold: clearDlg.bind(model.id, model.title)
                 }
             }
         }
@@ -172,9 +156,23 @@ Item {
 
     // 空态
     Text {
-        visible: root.items.length === 0
+        visible: convModel.count === 0
         anchors.centerIn: parent
         text: qsTr("暂无消息")
         color: Theme.textSecondary; font.pixelSize: Theme.fontSizeSmall
+    }
+
+    // 长按会话卡片：清空该会话
+    ConfirmDialog {
+        id: clearDlg
+        titleText: qsTr("删除会话")
+        messageText: qsTr("确定要清空该会话的全部消息吗？")
+        okText: qsTr("删除")
+        property int convId: 0
+        function bind(id) {
+            convId = id
+            open()
+        }
+        onConfirmed: ChatData.clearConversation(clearDlg.convId)
     }
 }

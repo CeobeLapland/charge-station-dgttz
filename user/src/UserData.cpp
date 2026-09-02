@@ -16,6 +16,14 @@ QVariantMap S(const std::initializer_list<std::pair<QString, QVariant>>& list) {
     return m;
 }
 
+// 便捷构造 list
+QVariantList S_list(const std::initializer_list<QVariant>& list) {
+    QVariantList l;
+    for (const auto& v : list)
+        l.append(v);
+    return l;
+}
+
 // 首个（默认）用户手机号，作为 profile 的固定 phone；昵称默认「用户+后四位」
 const QString kPhone = QStringLiteral("13800000001");
 
@@ -692,7 +700,19 @@ QVariantList buildMemberPlans() {
 }  // namespace
 
 UserData::UserData(QObject* parent)
-    : QObject(parent), m_nickname(QStringLiteral("用户0001")), m_avatarPath(QString()), m_balance(86.50) {}
+    : QObject(parent), m_nickname(QStringLiteral("用户0001")), m_avatarPath(QString()), m_balance(86.50) {
+    // 车辆初始种子
+    const QVariantList initVeh = buildVehicles();
+    for (const auto& ve : initVeh)
+        m_vehicles.append(ve.toMap());
+    // 收藏初始种子（对齐 orderSeeds/Explore 中存在的电站 id）
+    auto now = QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"));
+    m_favorites = {
+        S({ {"station_id", 5},  {"create_time", now} }),   // 自营·三里屯太古里站
+        S({ {"station_id", 11}, {"create_time", now} }),   // 自营·深圳湾科技园站
+        S({ {"station_id", 15}, {"create_time", now} })    // 特来电·苏州金鸡湖站
+    };
+}
 
 QVariantMap UserData::profile() const {
     return S({
@@ -710,8 +730,9 @@ QVariantMap UserData::profile() const {
 }
 
 QVariantList UserData::vehicles() const {
-    static const QVariantList s = buildVehicles();
-    return s;
+    QVariantList out;
+    for (const auto& m : m_vehicles) out.append(m);
+    return out;
 }
 
 QVariantList UserData::orders() const {
@@ -837,6 +858,115 @@ bool UserData::subscribePlan(int planId) {
             && m.value(QStringLiteral("status")).toString() == QStringLiteral("active")) {
             m_currentPlanId = planId;
             emit profileChanged();
+            return true;
+        }
+    }
+    return false;
+}
+
+// —— 我的收藏（favorite）——
+QVariantList UserData::favorites() const {
+    // 新收藏在前
+    QVariantList out;
+    for (auto it = m_favorites.rbegin(); it != m_favorites.rend(); ++it) out.append(*it);
+    return out;
+}
+
+bool UserData::isFavorite(int stationId) const {
+    for (const auto& f : m_favorites)
+        if (f.value(QStringLiteral("station_id")).toInt() == stationId)
+            return true;
+    return false;
+}
+
+bool UserData::toggleFavorite(int stationId) {
+    if (stationId <= 0) return false;
+    for (int i = 0; i < m_favorites.size(); ++i) {
+        if (m_favorites[i].value(QStringLiteral("station_id")).toInt() == stationId) {
+            m_favorites.removeAt(i);
+            emit favoritesChanged();
+            return false;   // 取消收藏
+        }
+    }
+    auto now = QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"));
+    m_favorites.append(S({ {"station_id", stationId}, {"create_time", now} }));
+    emit favoritesChanged();
+    return true;   // 新增收藏
+}
+
+// —— 我的评论（review，社区/评价占位数据）——
+QVariantList UserData::myReviews() const {
+    return S_list({
+        S({
+            {"id",             7001},
+            {"station_name",   QStringLiteral("自营·中关村软件园旗舰站")},
+            {"overall_score",  4.6},
+            {"tags",           QStringList{QStringLiteral("充电快"), QStringLiteral("车位多")}},
+            {"content",        QStringLiteral("中午来人不算多，快充功率很给力，二十分钟从 12% 到 85%。")},
+            {"create_time",    QStringLiteral("2025-01-18 12:40:00")},
+            {"useful_count",   6}
+        }),
+        S({
+            {"id",             7002},
+            {"station_name",   QStringLiteral("星星充·国贸中心旗舰站")},
+            {"overall_score",  4.2},
+            {"tags",           QStringList{QStringLiteral("充电较贵"), QStringLiteral("位置方便")}},
+            {"content",        QStringLiteral("高峰期过来排队久，不过桩多，等 10 分钟左右。周边吃饭方便。")},
+            {"create_time",    QStringLiteral("2024-10-05 19:20:00")},
+            {"useful_count",   3}
+        }),
+        S({
+            {"id",             7003},
+            {"station_name",   QStringLiteral("特来电·苏州金鸡湖站")},
+            {"overall_score",  4.8},
+            {"tags",           QStringList{QStringLiteral("环境好"), QStringLiteral("慢充安静")}},
+            {"content",        QStringLiteral("晚上谷电慢充超划算，湖边风景不错，躺着等也不无聊。")},
+            {"create_time",    QStringLiteral("2024-06-22 22:15:00")},
+            {"useful_count",   11}
+        })
+    });
+}
+
+// —— 我的车辆变更（内存态）——
+int UserData::addVehicle(const QVariantMap& in) {
+    int maxId = 99;
+    for (const auto& m : m_vehicles)
+        maxId = qMax(maxId, m.value(QStringLiteral("id")).toInt());
+    QVariantMap v = in;
+    v.insert(QStringLiteral("id"), maxId + 1);
+    if (!v.contains(QStringLiteral("is_default")))
+        v.insert(QStringLiteral("is_default"), 0);
+    if (!v.contains(QStringLiteral("created_time")))
+        v.insert(QStringLiteral("created_time"),
+                 QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss")));
+    for (const auto& key : {QStringLiteral("name"), QStringLiteral("type"),
+                            QStringLiteral("connector_type"), QStringLiteral("battery_kwh"),
+                            QStringLiteral("max_power_kw")}) {
+        if (v.value(key).isNull() || !v.contains(key))
+            v.insert(key, QVariant());
+    }
+    m_vehicles.append(v);
+    emit vehiclesChanged();
+    return v.value(QStringLiteral("id")).toInt();
+}
+
+bool UserData::updateVehicle(int vehicleId, const QVariantMap& in) {
+    for (auto& m : m_vehicles) {
+        if (m.value(QStringLiteral("id")).toInt() == vehicleId) {
+            for (auto it = in.cbegin(); it != in.cend(); ++it)
+                m.insert(it.key(), it.value());
+            emit vehiclesChanged();
+            return true;
+        }
+    }
+    return false;
+}
+
+bool UserData::removeVehicle(int vehicleId) {
+    for (int i = 0; i < m_vehicles.size(); ++i) {
+        if (m_vehicles[i].value(QStringLiteral("id")).toInt() == vehicleId) {
+            m_vehicles.removeAt(i);
+            emit vehiclesChanged();
             return true;
         }
     }
