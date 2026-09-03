@@ -74,9 +74,9 @@
 
 对于预测目标站 $s$，读取最近 $D$ 天（建议 $D=7$）的历史负荷数据，按"星期几 × 小时"分桶聚合：
 
-$$
+```math
 \bar{P}_{d,h}^{(s)} = \frac{1}{|\mathcal{O}_{d,h}|} \sum_{t \in \mathcal{O}_{d,h}} P_t^{(s)}
-$$
+```
 
 其中 $d \in \{0,1,...,6\}$（0=周一），$h \in \{0,1,...,23\}$，$\mathcal{O}_{d,h}$ 为属于星期 $d$ 第 $h$ 小时的所有采样时刻集合。
 
@@ -84,9 +84,9 @@ $$
 
 对 24 小时序列做中心移动平均，消除随机噪声：
 
-$$
+```math
 \tilde{P}_{d,h}^{(s)} = \frac{1}{2k+1} \sum_{i=-k}^{k} \bar{P}_{d,(h+i) \mod 24}^{(s)}
-$$
+```
 
 建议窗口 $k=1$（即 3 小时平滑）。
 
@@ -94,15 +94,15 @@ $$
 
 假设负荷存在线性增长趋势，计算最近 $D$ 天的日总量增长率：
 
-$$
+```math
 g = \frac{\sum_{h=0}^{23} \bar{P}_{\text{today},h} - \sum_{h=0}^{23} \bar{P}_{\text{today}-D,h}}{D \cdot \sum_{h=0}^{23} \bar{P}_{\text{today}-D,h}}
-$$
+```
 
 未来第 $i$ 小时（$i = 1, ..., T$）的预测值为：
 
-$$
+```math
 \hat{P}_{t_{N+i}} = \tilde{P}_{d^*, (h_0 + i) \mod 24} \cdot (1 + g)^{\lceil i/24 \rceil} \cdot \epsilon_i
-$$
+```
 
 其中：
 - $d^*$ 为预测起始日的星期索引
@@ -113,12 +113,12 @@ $$
 
 基于历史预测残差的标准差 $\sigma_r$ 计算 90% 置信区间：
 
-$$
+```math
 \hat{P}_{t_{N+i}}^{\text{upper}} = \hat{P}_{t_{N+i}} \cdot (1 + 1.645 \cdot \sigma_r)
-$$
-$$
+```
+```math
 \hat{P}_{t_{N+i}}^{\text{lower}} = \hat{P}_{t_{N+i}} \cdot (1 - 1.645 \cdot \sigma_r)
-$$
+```
 
 ### 2.3 C++ 实现框架
 
@@ -264,48 +264,48 @@ private:
 
 健康度为**扣分制**，满分 100，根据多维异常指标逐项扣减：
 
-$$
+```math
 H = \text{clip}\left(100 - \sum_{j=1}^{4} \text{penalty}_j,\ 0,\ 100\right)
-$$
+```
 
 #### 3.2.1 各惩罚项定义
 
 **（1）温度惩罚**
 
-$$
+```math
 \text{penalty}_{\text{temp}} = \begin{cases}
 0 & T \leq 50^{\circ}\text{C} \\
 2 \cdot (T - 50) & 50 < T \leq 80 \\
 60 + 5 \cdot (T - 80) & T > 80
 \end{cases}
-$$
+```
 
 **（2）通信惩罚**
 
-$$
+```math
 \text{penalty}_{\text{comm}} = \begin{cases}
 0 & \text{通信正常} \\
 15 & \text{通信异常}
 \end{cases}
-$$
+```
 
 **（3）功率波动惩罚**
 
 计算最近 24 小时内功率序列 $\{P_1, P_2, ..., P_N\}$ 的变异系数（CV）：
 
-$$
+```math
 \mu_P = \frac{1}{N}\sum_{i=1}^{N} P_i, \quad \sigma_P = \sqrt{\frac{1}{N}\sum_{i=1}^{N}(P_i - \mu_P)^2}
-$$
+```
 
-$$
+```math
 \text{CV} = \frac{\sigma_P}{\mu_P}, \quad \text{penalty}_{\text{power}} = 20 \cdot \min(\text{CV}, 2.0)
-$$
+```
 
 **（4）历史异常惩罚**
 
-$$
+```math
 \text{penalty}_{\text{fault}} = 5 \cdot N_{\text{fault}}
-$$
+```
 
 其中 $N_{\text{fault}}$ 为最近 30 天内该桩的故障/告警次数。
 
@@ -313,9 +313,9 @@ $$
 
 基于健康度推导故障风险概率：
 
-$$
+```math
 R = \text{clip}\left(\frac{100 - H}{100} \cdot 0.8 + \mathcal{N}(0, 0.02^2),\ 0.0,\ 1.0\right)
-$$
+```
 
 风险等级划分：
 | 风险概率 $R$ | 等级 | 颜色 |
@@ -425,39 +425,39 @@ private:
 
 对于候选站 $s$ 和用户 $u$：
 
-$$
+```math
 S_{\text{balanced}}(s, u) = w_d \cdot f_d(s, u) + w_p \cdot f_p(s) + w_w \cdot f_w(s) + w_h \cdot f_h(s)
-$$
+```
 
 其中特征函数定义如下：
 
 **距离特征** $f_d$（指数衰减，越近越好）：
 
-$$
+```math
 f_d(s, u) = \exp\left(-\frac{d(s, u)}{d_0}\right)
-$$
+```
 
 其中 $d(s, u)$ 为用户到站的直线距离（km），$d_0 = 5$ km 为衰减常数。
 
 **价格特征** $f_p$（价格越低越好）：
 
-$$
+```math
 f_p(s) = \frac{1}{1 + \alpha \cdot p_s}
-$$
+```
 
 其中 $p_s$ 为站 $s$ 的服务费（元/kWh），$\alpha = 2.0$ 为敏感度参数。
 
 **等待特征** $f_w$（空闲桩比例越高越好）：
 
-$$
+```math
 f_w(s) = \frac{N_{\text{idle}}(s)}{N_{\text{total}}(s)}
-$$
+```
 
 **健康度特征** $f_h$（设备平均健康度越高越好）：
 
-$$
+```math
 f_h(s) = \frac{1}{N_{\text{total}}(s)} \sum_{c \in s} \frac{H_c}{100}
-$$
+```
 
 #### 4.2.2 权重配置（默认 / 三类标签）
 
@@ -471,9 +471,9 @@ $$
 
 雨天时，对室内站/有雨棚站施加加分：
 
-$$
+```math
 S_{\text{rain}}(s) = S(s) \cdot \left(1 + 0.15 \cdot \mathbb{1}_{[s\text{ 有雨棚或地下停车}]}\right)
-$$
+```
 
 极端天气时，所有室外站评分乘以 0.5。
 
@@ -562,9 +562,9 @@ private:
 
 #### 5.2.1 当前等待时间
 
-$$
+```math
 W_{\text{now}} = Q \cdot \bar{t}_{\text{remain}}
-$$
+```
 
 其中：
 - $Q$：当前排队人数（`reservation` 表中 `status = waiting` 的数量）
@@ -572,9 +572,9 @@ $$
 
 #### 5.2.2 历史同期平均剩余时长计算
 
-$$
+```math
 \bar{t}_{\text{remain}} = \frac{1}{|\mathcal{C}|} \sum_{c \in \mathcal{C}} \frac{t_{\text{total}}^{(c)} - t_{\text{elapsed}}^{(c)}}{2}
-$$
+```
 
 其中 $\mathcal{C}$ 为最近 7 天同小时时段内该站所有充电中的订单集合。除以 2 是因为平均而言当前正在充的订单还剩一半时间。
 
@@ -582,9 +582,9 @@ $$
 
 利用负荷预测推断未来队列变化：
 
-$$
+```math
 W_{t+\Delta} = W_{\text{now}} \cdot \frac{L_{\text{forecast}}(t+\Delta)}{L_{\text{current}}} \cdot \eta(\Delta)
-$$
+```
 
 其中：
 - $L_{\text{forecast}}(t+\Delta)$：未来 $\Delta$ 时刻的预测负荷
@@ -593,14 +593,14 @@ $$
 
 #### 5.2.4 建议规则
 
-$$
+```math
 \text{suggestion} = \begin{cases}
 \text{"建议现在前往"} & W_{\text{now}} \leq 5 \\
 \text{"建议 10 分钟后前往"} & 5 < W_{\text{now}} \leq 15 \\
 \text{"建议 20 分钟后前往"} & 15 < W_{\text{now}} \leq 30 \\
 \text{"建议更换充电站"} & W_{\text{now}} > 30
 \end{cases}
-$$
+```
 
 ### 5.3 C++ 实现框架
 
@@ -685,9 +685,9 @@ private:
 
 在负荷预测步骤 3 中加入天气乘数：
 
-$$
+```math
 \hat{P}_{t_{N+i}}^{(\text{weather})} = \hat{P}_{t_{N+i}} \cdot \gamma_{\text{weather}} \cdot \gamma_{\text{type}}
-$$
+```
 
 其中 $\gamma_{\text{weather}}$ 为天气系数，$\gamma_{\text{type}}$ 为站类型系数（室内/室外）。
 
@@ -711,17 +711,17 @@ $$
 
 按"星期几 $d$ × 小时 $h$ × 区域 $a$"三维聚合：
 
-$$
+```math
 D_{d,h,a} = \sum_{o \in \mathcal{O}_{d,h,a}} \mathbb{1}_{[o\text{ 为有效订单}]}
-$$
+```
 
 #### 7.2.2 需求激增检测
 
 对每 $(d, h, a)$ 组合，计算相对基准的增幅：
 
-$$
+```math
 \Delta_{d,h,a} = \frac{D_{d,h,a} - \bar{D}_{h,a}}{\bar{D}_{h,a}}
-$$
+```
 
 其中 $\bar{D}_{h,a}$ 为该区域该小时的历史平均值（不区分星期）。
 
@@ -773,25 +773,25 @@ $$
 
 **规则 1：高频预约取消**
 
-$$
+```math
 \text{Risk}_1 = \mathbb{1}_{[N_{\text{reserve}}^{24h} \geq 10 \ \land \ r_{\text{cancel}} \geq 0.6]}
-$$
+```
 
 其中 $N_{\text{reserve}}^{24h}$ 为最近 24 小时预约次数，$r_{\text{cancel}}$ 为取消率。
 
 **规则 2：异常充电行为**
 
-$$
+```math
 \text{Risk}_2 = \mathbb{1}_{[\text{单次充电时长} < 5\text{min} \ \land \ \text{次数} \geq 3 \text{/天}]}
-$$
+```
 
 （疑似刷单：频繁插拔枪但不充电）
 
 ### 9.2 风险评分
 
-$$
+```math
 \text{RiskScore} = \text{clip}\left(50 \cdot \text{Risk}_1 + 30 \cdot \text{Risk}_2 + 20 \cdot \text{Risk}_3,\ 0,\ 100\right)
-$$
+```
 
 | 评分 | 等级 | 处置建议 |
 |------|------|----------|
@@ -818,27 +818,27 @@ $$
 
 **平均等待时间**：
 
-$$
+```math
 \hat{W} = \frac{Q \cdot \bar{t}_{\text{remain}}}{N_{\text{total}} + \text{add\_chargers}} \cdot (1 + \text{failure\_scale}) \cdot (1 - 0.3 \cdot \text{price\_delta})
-$$
+```
 
 **峰值利用率**：
 
-$$
+```math
 \hat{U}_{\text{peak}} = \frac{D_{\text{peak}} \cdot (1 + \text{traffic\_delta})}{N_{\text{total}} + \text{add\_chargers}} \cdot \frac{1}{1 - \text{failure\_scale}}
-$$
+```
 
 **预计日订单量**：
 
-$$
+```math
 \hat{N}_{\text{order}} = \bar{N}_{\text{order}} \cdot (1 + \text{traffic\_delta}) \cdot (1 - 0.2 \cdot \text{price\_delta})
-$$
+```
 
 **预计日营收**：
 
-$$
+```math
 \hat{R} = \hat{N}_{\text{order}} \cdot (\bar{p} + \text{price\_delta}) \cdot \bar{e}
-$$
+```
 
 其中 $\bar{e}$ 为平均单次充电量（kWh）。
 
@@ -850,33 +850,33 @@ $$
 
 对某站 $s$ 的评价标签集合 $\mathcal{T}_s$：
 
-$$
+```math
 \text{Freq}(t, s) = \sum_{r \in \mathcal{R}_s} \mathbb{1}_{[t \in r.\text{tags}]}, \quad \forall t \in \mathcal{T}
-$$
+```
 
 ### 11.2 环比计算
 
 对比本期（最近 30 天）与上期（再前 30 天）：
 
-$$
+```math
 \text{MoM}(t, s) = \frac{\text{Freq}_{\text{current}}(t, s) - \text{Freq}_{\text{previous}}(t, s)}{\text{Freq}_{\text{previous}}(t, s) + \epsilon}
-$$
+```
 
 ### 11.3 TOP5 问题提取
 
 按频次降序排列，取 Top 5：
 
-$$
+```math
 \text{TOP5}(s) = \underset{t \in \mathcal{T}}{\text{argtop5}}\ \text{Freq}(t, s)
-$$
+```
 
 ### 11.4 分维度评分均值
 
 对五个维度分别计算均值：
 
-$$
+```math
 \bar{S}_{\text{dim}} = \frac{1}{|\mathcal{R}_s|} \sum_{r \in \mathcal{R}_s} r.\text{dim\_score}, \quad \text{dim} \in \{\text{speed}, \text{device}, \text{parking}, \text{hygiene}, \text{service}\}
-$$
+```
 
 ---
 
@@ -922,17 +922,17 @@ QString answerQuery(const QString& question) {
 
 #### 13.1.1 负荷预测准确度
 
-$$
+```math
 \text{MAPE} = \frac{100\%}{T} \sum_{i=1}^{T} \left|\frac{\hat{P}_i - P_i}{P_i}\right|
-$$
+```
 
 **达标阈值**：MAPE ≤ 15%
 
 #### 13.1.2 故障预测命中率
 
-$$
+```math
 \text{HitRate} = \frac{|\{\text{预测高风险且 24h 内实际故障}\}|}{|\{\text{预测高风险}\}|}
-$$
+```
 
 **达标阈值**：HitRate ≥ 30%（基于规则模型的合理预期）
 
@@ -940,9 +940,9 @@ $$
 
 采用 Kendall's Tau 系数衡量推荐排序与用户选择的匹配度：
 
-$$
+```math
 \tau = \frac{\text{一致对数} - \text{不一致对数}}{\binom{n}{2}}
-$$
+```
 
 ### 13.2 兜底机制
 
