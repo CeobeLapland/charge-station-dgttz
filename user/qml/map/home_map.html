@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>首页地图</title>
+<!--
+  Leaflet（DOM/CSS 渲染，不依赖 WebGL）：
+  - 在地图瓦片仓库（xxn_map.qrc）内离线打包 lib/leaflet.js|.css；
+  - 无 GPU / 虚拟机环境也能拖拽、缩放、选点，纯 CPU 即可运行。
+  与探索页共用同一套底图瓦片源（authStore），各自独立实例。
+-->
+<link rel="stylesheet" href="lib/leaflet.css">
+<style>
+  html, body, #map { margin: 0; padding: 0; width: 100%; height: 100%; }
+  .leaflet-container { background: #e0e4e8; }
+  .err-banner {
+    position: absolute; left: 12px; right: 12px; bottom: 20px; z-index: 800;
+    background: rgba(220,53,69,0.92); color: #fff; font: 13px/1.4 system-ui, sans-serif;
+    padding: 8px 12px; border-radius: 6px; display: none;
+  }
+
+  /* 我的定位：蓝色脉冲圆点 */
+  .me-dot {
+    width: 18px; height: 18px; border-radius: 50%;
+    background: #0e7dff; border: 3px solid rgba(255,255,255,.9);
+    box-shadow: 0 0 0 0 rgba(14,125,255,.4);
+    animation: pulse 1.8s infinite;
+  }
+  @keyframes pulse {
+    0% { box-shadow: 0 0 0 0 rgba(14,125,255,.45); }
+    70% { box-shadow: 0 0 0 14px rgba(14,125,255,0); }
+    100% { box-shadow: 0 0 0 0 rgba(14,125,255,0); }
+  }
+  /* 电站小水滴：仅展示，不可点击，也不阻挡地图拖拽 */
+  .drop {
+    width: 16px; height: 16px; border-radius: 50% 50% 50% 0;
+    transform: rotate(-45deg); background: #12c8ff;
+    border: 2px solid #ffffff; box-shadow: 0 1px 3px rgba(0,0,0,.25);
+    pointer-events: none;
+  }
+  /* 目标点：橙色水滴大头针 */
+  .dest {
+    width: 26px; height: 32px;
+  }
+  .dest .pin {
+    width: 26px; height: 28px; border-radius: 50% 50% 50% 4px;
+    transform: rotate(-45deg); background: #f04438;
+    border: 2px solid #fff; box-shadow: 0 2px 4px rgba(0,0,0,.28);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .dest .pin::after { content: ""; width: 8px; height: 8px; border-radius: 50%; background: #fff; transform: rotate(45deg); }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div class="err-banner" id="err"></div>
+<script src="lib/leaflet.js"></script>
+<script>
+  // 默认定位点（北京，模拟用户位置，之后由服务端驱动）
+  var DEFAULT_CENTER = [39.916527, 116.397128];   // [lat, lng]
+  var DEFAULT_TEMPLATE =
+    'https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}';
+
+  var ERR_THRESHOLD = 6;
+  var failCount = 0;
+  var errBanner = document.getElementById('err');
+  function showErr(msg) { errBanner.style.display = 'block'; errBanner.textContent = msg; }
+  function hideErr()    { errBanner.style.display = 'none'; }
+
+  // 把形如 {1,2,3,4} 的瓦片子域模板转成 Leaflet 的 {s} + subdomains 数组
+  function normalizeTemplate(tpl) {
+    if (!tpl) return { url: null, sub: null };
+    var m = tpl.match(/\{([^{},]+(?:,[^{},]+)+)\}/);
+    if (m) {
+      return {
+        url: tpl.slice(0, m.index) + '{s}' + tpl.slice(m.index + m[0].length),
+        sub: m[1].split(',').map(function (x) { return x.trim(); })
+      };
+    }
+    return { url: tpl, sub: null };
+  }
+
+  var map;
+  var myMarker = null;
+  var destMarker = null;
+  var DROPS = {};          // stationId -> marker
+  var tileLayer = null;
+  var pickMode = false;
+
+  function applyTile(template) {
+    var norm = normalizeTemplate(template || DEFAULT_TEMPLATE);
+    if (!norm.url) return;
+    if (tileLayer) {
+      if (norm.sub) tileLayer.options.subdomains = norm.sub;
+      tileLayer.setUrl(norm.url);
+    }
+  }
+
+  try {
+    map = L.map('map', {
+      center: DEFAULT_CENTER,
+      zoom: 13,
+      zoomControl: false,
+      attributionControl: false
+    });
+  } catch (e) {
+    showErr('地图初始化失败：' + (e && e.message ? e.message : e));
+    throw e;
+  }
+
+  tileLayer = L.tileLayer(DEFAULT_TEMPLATE, { subdomains: ['1','2','3','4'], noWrap: false });
+  tileLayer.addTo(map);
+
+  map.on('tileerror', function () {
+    failCount++;
+    if (failCount >= ERR_THRESHOLD) showErr('当前瓦片源加载失败，到「我的-设置」里切换地图源。');
+  });
+  map.on('load', function () { failCount = 0; hideErr(); });
+
+  // —— 电站小水滴（只展示，不点击，不阻挡地图拖拽） ——
+  function dropIcon() {
+    return L.divIcon({ html: '<div class="drop"></div>', className: '', iconSize: [16, 16], iconAnchor: [8, 8] });
+  }
+  function setStations(jsonOrArray) {
+    var arr = Array.isArray(jsonOrArray) ? jsonOrArray : (JSON.parse(jsonOrArray || '[]'));
+    for (var id in DROPS) { try { map.removeLayer(DROPS[id]); } catch (e) {} }
+    DROPS = {};
+    for (var i = 0; i < arr.length; i++) {
+      var s = arr[i];
+      if (!s || s.longitude == null || s.latitude == null) continue;
+      try {
+        var m = L.marker([Number(s.latitude), Number(s.longitude)], {
+          icon: dropIcon(), interactive: false, keyboard: false
+        }).addTo(map);
+        DROPS[s.id] = m;
+      } catch (e) { /* 单点失败不影响整体 */ }
+    }
+  }
+
+  // —— 我的定位点 ——
+  function meIcon() {
+    return L.divIcon({ html: '<div class="me-dot"></div>', className: '', iconSize: [24, 24], iconAnchor: [12, 12] });
+  }
+  function setMyLocation(lng, lat) {
+    lng = Number(lng); lat = Number(lat);
+    if (isNaN(lng) || isNaN(lat)) return;
+    if (!myMarker) {
+      myMarker = L.marker([lat, lng], { icon: meIcon(), interactive: false, keyboard: false }).addTo(map);
+    } else {
+      myMarker.setLatLng([lat, lng]);
+    }
+  }
+
+  // —— 目标点（搜索 / 手动选点） ——
+  function destIcon() {
+    return L.divIcon({
+      html: '<div class="dest"><div class="pin"></div></div>',
+      className: '', iconSize: [26, 32], iconAnchor: [13, 32]
+    });
+  }
+  function setDestination(lng, lat) {
+    lng = Number(lng); lat = Number(lat);
+    if (isNaN(lng) || isNaN(lat)) return;
+    if (!destMarker) {
+      destMarker = L.marker([lat, lng], { icon: destIcon(), interactive: false, keyboard: false }).addTo(map);
+    } else {
+      destMarker.setLatLng([lat, lng]);
+    }
+  }
+  function clearDestination() { if (destMarker) { try { map.removeLayer(destMarker); } catch (e) {} destMarker = null; } }
+
+  // —— 选点模式：开启后点地图任意处回调 QML ——
+  function setPickMode(on) { pickMode = !!on; }
+  map.on('click', function (e) {
+    if (pickMode && window.__onPickPoint && e && e.latlng)
+      window.__onPickPoint(e.latlng.lng.toFixed(6), e.latlng.lat.toFixed(6));
+  });
+
+  // —— 交互开关（Leaflet 全部为 DOM/CSS 实现，无 GPU 也能拖拽缩放） ——
+  function setInteractive(on) {
+    var lock = on ? 'enable' : 'disable';
+    ['dragging', 'scrollWheelZoom', 'doubleClickZoom', 'touchZoom', 'keyboard'].forEach(function (name) {
+      try { map[name] && map[name][lock](); } catch (e) {}
+    });
+  }
+
+  // —— 瓦片源 ——
+  function setTileTemplate(template) { applyTile(template); }
+
+  // —— 飞镜头 ——
+  function flyTo(lng, lat, zoom) {
+    map.flyTo([Number(lat), Number(lng)], typeof zoom === 'number' ? zoom : 14);
+  }
+
+  setInteractive(true);
+</script>
+</body>
+</html>
