@@ -16,7 +16,15 @@
 #include "ChatData.h"
 
 int main(int argc, char *argv[]) {
-    // 探索页地图使用 QtWebEngine 加载 MapLibre GL JS，需在创建 QGuiApplication 前初始化
+    // 探索页地图使用 QtWebEngine 加载 MapLibre GL JS，需在创建 QGuiApplication 前初始化。
+    // —— WebGL 软件渲染兜底 ——
+    // 无 GPU / 虚拟机环境下 Chromium 建不了 WebGL 上下文，会导致地图"看得到但拖不动"。
+    // 这里回退到 SwiftShader 软件渲染，让地图始终可渲染、可拖拽缩放、可选点。
+    // 仅当用户未显式设置 QTWEBENGINE_CHROMIUM_FLAGS 时才生效，保留硬件加速与自定义覆盖的能力。
+    if (qEnvironmentVariableIsEmpty("QTWEBENGINE_CHROMIUM_FLAGS"))
+        qputenv("QTWEBENGINE_CHROMIUM_FLAGS",
+                "--use-gl=angle --use-angle=swiftshader --enable-unsafe-swiftshader ");
+
     QCoreApplication::setAttribute(Qt::AA_ShareOpenGLContexts);
     QtWebEngineQuick::initialize();
     QGuiApplication app(argc, argv);
