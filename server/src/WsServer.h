@@ -21,6 +21,7 @@ class QWebSocket;
 //   2xxx  订单/充电相关
 //   3xxx  电站/电桩相关
 //   4xxx  数据不存在  4001数据不存在
+//   5xxx  模型层      5001预测/模型不可用
 //   9xxx  协议层      9001消息格式错误 9002未知消息类型
 // ============================================================
 class WsServer : public QObject
@@ -85,6 +86,10 @@ private:
     QJsonObject handleAdminUserToggleStatus(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
     QJsonObject handleAdminDeviceLog(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
     QJsonObject handleAdminFaultRisk(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+
+    // ---- 数据大屏 screen.* / ml.* ----
+    QJsonObject handleScreenSnapshot(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+    QJsonObject handleMlForecast(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
 
     QWebSocketServer m_server;
     QHash<QWebSocket *, Session> m_clients;   // 在线连接 → 该连接的身份

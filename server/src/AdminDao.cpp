@@ -309,7 +309,6 @@ std::optional<DeviceLogRow> chargerAction(int chargerId, const QString &action,
     if (!exists.exec() || !exists.next())
         return std::nullopt;                       // 4001 电桩不存在
 
-    // 改状态 + 记日志必须一起成功, 否则会出现"状态变了但没有操作记录"
     QSqlDatabase::database().transaction();
 
     QSqlQuery up;
