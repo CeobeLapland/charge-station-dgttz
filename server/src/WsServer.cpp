@@ -55,7 +55,7 @@ bool WsServer::isListening() const { return m_server.isListening(); }
 void WsServer::onNewConnection()
 {
     QWebSocket *sock = m_server.nextPendingConnection();
-    m_clients.append(sock);
+    m_clients.insert(sock, Session{});          // 新连接: 身份为空, 等待登录
     connect(sock, &QWebSocket::textMessageReceived, this, &WsServer::onTextMessage);
     connect(sock, &QWebSocket::disconnected, this, &WsServer::onDisconnected);
     qInfo().noquote() << QStringLiteral("[连接] 新客户端: %1 (当前在线 %2)")
@@ -66,9 +66,20 @@ void WsServer::onDisconnected()
 {
     auto *sock = qobject_cast<QWebSocket *>(sender());
     if (!sock) return;
-    m_clients.removeAll(sock);
+    m_clients.remove(sock);                     // 连接没了, 它的身份也一起清掉
     sock->deleteLater();
     qInfo().noquote() << QStringLiteral("[断开] 客户端离线 (当前在线 %1)").arg(m_clients.size());
+}
+
+// ---------- 服务端主动推送: 群发给所有在线连接 ----------
+void WsServer::broadcast(const QString &type, const QJsonObject &payload)
+{
+    // 推送不是任何请求的回应, 所以没有 seq(见 spec-协议.md)
+    const QJsonObject msg{{"type", type}, {"payload", payload}};
+    const QString text = QString::fromUtf8(QJsonDocument(msg).toJson(QJsonDocument::Compact));
+    for (auto it = m_clients.cbegin(); it != m_clients.cend(); ++it)
+        it.key()->sendTextMessage(text);
+    qInfo().noquote() << QStringLiteral("[推送] %1 → %2 个连接").arg(type).arg(m_clients.size());
 }
 
 void WsServer::onTextMessage(const QString &message)
@@ -92,12 +103,13 @@ void WsServer::onTextMessage(const QString &message)
     const qint64      seq     = req.value(QStringLiteral("seq")).toInteger();
     const QJsonObject payload = req.value(QStringLiteral("payload")).toObject();
 
-    qInfo().noquote() << QStringLiteral("[收到] %1 (seq=%2)").arg(type).arg(seq);
+    qInfo().noquote() << QStringLiteral("[收到] %1 (seq=%2, user=%3)")
+                             .arg(type).arg(seq).arg(userIdOf(sock));
 
     // ---- 分发处理 ----
     int code = 0;
     QString msg = QStringLiteral("ok");
-    const QJsonObject respPayload = dispatch(type, payload, code, msg);
+    const QJsonObject respPayload = dispatch(sock, type, payload, code, msg);
 
     // ---- 拼响应信封并回发 ----
     reply = QJsonObject{{"type", type + QStringLiteral("_resp")}, {"seq", seq},
@@ -105,13 +117,14 @@ void WsServer::onTextMessage(const QString &message)
     sock->sendTextMessage(QString::fromUtf8(QJsonDocument(reply).toJson(QJsonDocument::Compact)));
 }
 
-QJsonObject WsServer::dispatch(const QString &type, const QJsonObject &payload,
+QJsonObject WsServer::dispatch(QWebSocket *sock, const QString &type, const QJsonObject &payload,
                                int &code, QString &message)
 {
-    if (type == QStringLiteral("system.ping"))     return handlePing(payload, code, message);
-    if (type == QStringLiteral("user.login"))      return handleUserLogin(payload, code, message);
-    if (type == QStringLiteral("station.nearby"))  return handleStationNearby(payload, code, message);
-    if (type == QStringLiteral("station.detail"))  return handleStationDetail(payload, code, message);
+    if (type == QStringLiteral("system.ping"))     return handlePing(sock, payload, code, message);
+    if (type == QStringLiteral("user.login"))      return handleUserLogin(sock, payload, code, message);
+    if (type == QStringLiteral("user.info"))       return handleUserInfo(sock, payload, code, message);
+    if (type == QStringLiteral("station.nearby"))  return handleStationNearby(sock, payload, code, message);
+    if (type == QStringLiteral("station.detail"))  return handleStationDetail(sock, payload, code, message);
 
     // 9002: 未知/未实现的消息 —— 响亮地失败, 并说清找谁
     code = 9002;
@@ -120,14 +133,15 @@ QJsonObject WsServer::dispatch(const QString &type, const QJsonObject &payload,
 }
 
 // ---------- system.ping: 心跳 ----------
-QJsonObject WsServer::handlePing(const QJsonObject &, int &, QString &)
+QJsonObject WsServer::handlePing(QWebSocket *, const QJsonObject &, int &, QString &)
 {
     return QJsonObject{{"timestamp",
         QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"))}};
 }
 
 // ---------- user.login: 手机号免密登录 ----------
-QJsonObject WsServer::handleUserLogin(const QJsonObject &payload, int &code, QString &message)
+QJsonObject WsServer::handleUserLogin(QWebSocket *sock, const QJsonObject &payload,
+                                      int &code, QString &message)
 {
     const QString phone = payload.value(QStringLiteral("phone")).toString();
     bool created = false;
@@ -142,12 +156,40 @@ QJsonObject WsServer::handleUserLogin(const QJsonObject &payload, int &code, QSt
         message = QStringLiteral("该账号已被冻结, 请联系管理员");
         return {};
     }
+
+    // ★ 会话绑定: 把身份记在这条连接上。之后这条连接的所有请求都用这个 id,
+    //   不再读客户端 payload 里的 user_id。
+    m_clients[sock].userId = user->id;
+    qInfo().noquote() << QStringLiteral("[登录] 连接 %1 绑定 user_id=%2 (%3)")
+                             .arg(sock->peerAddress().toString()).arg(user->id).arg(user->nickname);
+
     message = created ? QStringLiteral("注册并登录成功") : QStringLiteral("登录成功");
     return QJsonObject{{"user", userToJson(*user)}, {"created", created}};
 }
 
+// ---------- user.info: 获取当前登录用户信息(不带任何 id, 身份来自连接) ----------
+QJsonObject WsServer::handleUserInfo(QWebSocket *sock, const QJsonObject &,
+                                     int &code, QString &message)
+{
+    const int uid = userIdOf(sock);
+    if (uid == 0) {
+        code = 1004;
+        message = QStringLiteral("尚未登录: 请先发送 user.login");
+        return {};
+    }
+    const auto user = dao::findUserById(uid);
+    if (!user) {
+        code = 4001;
+        message = QStringLiteral("用户不存在: id=%1").arg(uid);
+        return {};
+    }
+    // portrait(充电画像) 待实现, 先返回空对象, 字段名按 spec-协议.md 预留
+    return QJsonObject{{"user", userToJson(*user)}, {"portrait", QJsonObject{}}};
+}
+
 // ---------- station.nearby: 附近电站(按距离升序) ----------
-QJsonObject WsServer::handleStationNearby(const QJsonObject &payload, int &code, QString &message)
+QJsonObject WsServer::handleStationNearby(QWebSocket *, const QJsonObject &payload,
+                                          int &code, QString &message)
 {
     if (!payload.contains(QStringLiteral("longitude")) ||
         !payload.contains(QStringLiteral("latitude"))) {
@@ -181,7 +223,8 @@ QJsonObject WsServer::handleStationNearby(const QJsonObject &payload, int &code,
 }
 
 // ---------- station.detail: 电站 + 站内电桩明细 ----------
-QJsonObject WsServer::handleStationDetail(const QJsonObject &payload, int &code, QString &message)
+QJsonObject WsServer::handleStationDetail(QWebSocket *, const QJsonObject &payload,
+                                          int &code, QString &message)
 {
     const int stationId = payload.value(QStringLiteral("station_id")).toInt();
     const auto station = dao::findStationById(stationId);
