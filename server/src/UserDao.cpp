@@ -21,9 +21,13 @@ User rowToUser(const QSqlQuery &q)
     return u;
 }
 
-const char *kSelectUser =
+const char *kSelectUserByPhone =
     "SELECT id, phone, nickname, avatar_path, balance, points, level, status "
     "FROM user WHERE phone = ?";
+
+const char *kSelectUserById =
+    "SELECT id, phone, nickname, avatar_path, balance, points, level, status "
+    "FROM user WHERE id = ?";
 
 QString now()
 {
@@ -39,8 +43,18 @@ std::optional<User> findUserByPhone(const QString &phone)
     // prepare + addBindValue 是"参数化查询": 用户输入永远只当数据, 不会被
     // 拼进 SQL 文本 —— 这是防 SQL 注入的标准做法(数据安全考虑的得分点)。
     QSqlQuery q;
-    q.prepare(kSelectUser);
+    q.prepare(kSelectUserByPhone);
     q.addBindValue(phone);
+    if (!q.exec() || !q.next())
+        return std::nullopt;
+    return rowToUser(q);
+}
+
+std::optional<User> findUserById(int id)
+{
+    QSqlQuery q;
+    q.prepare(kSelectUserById);
+    q.addBindValue(id);
     if (!q.exec() || !q.next())
         return std::nullopt;
     return rowToUser(q);
