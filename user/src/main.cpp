@@ -13,6 +13,7 @@
 #include "Theme.h"
 #include "ExploreData.h"
 #include "UserData.h"
+#include "ChatData.h"
 
 int main(int argc, char *argv[]) {
     // 探索页地图使用 QtWebEngine 加载 MapLibre GL JS，需在创建 QGuiApplication 前初始化
@@ -65,6 +66,10 @@ int main(int argc, char *argv[]) {
     // 用户个人域 mock 数据：我的/订单/消息/结算等。
     static UserData userData;
     qmlRegisterSingletonInstance("UserClient", 1, 0, "UserData", &userData);
+
+    // 消息中心会话 mock 数据：会话卡片 + 聊天消息（支持发送/删除/已读）。
+    static ChatData chatData;
+    qmlRegisterSingletonInstance("UserClient", 1, 0, "ChatData", &chatData);
 
     const QUrl url(QStringLiteral("qrc:/UserClient/qml/Main.qml"));
     QObject::connect(

@@ -7,7 +7,8 @@ import UserClient
 // 列表可按状态筛选；点击进入详情（同一页面内覆盖层展示，通过 selectedOrderId 驱动）。
 Item {
     id: root
-    property string filterStatus: "all"   // all / reserved / charging / pending_settle / completed / cancelled
+    property string filterStatus: (root.initialStatus && root.initialStatus.length) ? root.initialStatus : "all"
+    property string initialStatus: ""   // 从 Profile 页订单栏跳转时传入：all / reserved / pending_settle
     property int selectedOrderId: 0
     readonly property var stackView: StackView.view
 
@@ -119,6 +120,7 @@ Item {
             height: 48
             property var tabs: [
                 { key: "all",           label: qsTr("全部") },
+                { key: "reserved",      label: qsTr("已预约") },
                 { key: "charging",      label: qsTr("进行中") },
                 { key: "pending_settle",label: qsTr("待结算") },
                 { key: "completed",     label: qsTr("已完成") },
@@ -127,7 +129,7 @@ Item {
             Repeater {
                 model: parent.tabs
                 delegate: Item {
-                    width: parent.width / 5
+                    width: parent.width / 6
                     height: parent.height
                     Column {
                         anchors.centerIn: parent
@@ -235,7 +237,7 @@ Item {
         color: Theme.background
         z: 10
 
-        Column {
+        Rectangle {
             width: parent.width
             height: 72
             color: Theme.primary
@@ -268,12 +270,14 @@ Item {
             anchors.bottom: parent.bottom
             clip: true
 
+            readonly property bool showPayBar: (root.order.status === "pending_settle")
+
             Column {
                 width: root.width - 32
                 x: 16
                 spacing: 14
                 topPadding: 14
-                bottomPadding: 20
+                bottomPadding: (parent.showPayBar ? 96 : 0) + 20
 
                 // 状态头卡
                 Rectangle {
@@ -284,21 +288,31 @@ Item {
                         GradientStop { position: 0; color: Theme.primary }
                         GradientStop { position: 1; color: Theme.accent }
                     }
-                    Row {
-                        anchors.fill: parent
-                        anchors.leftMargin: 16; anchors.rightMargin: 16
-                        spacing: 14
+                    // 状态文字（左）
+                    Text {
+                        id: statusLbl
+                        anchors.left: parent.left; anchors.leftMargin: 16
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: (root.order && root.order.status) ? root.statusText(root.order.status) : ""
+                        color: "#ffffff"; font.pixelSize: Theme.fontSizeTitle; font.bold: true
+                    }
+                    // 站名+桩号列（右）
+                    Column {
+                        id: stationCol
+                        anchors.right: parent.right; anchors.rightMargin: 16
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: 2
                         Text {
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: root.statusText(root.order.status)
-                            color: "#ffffff"; font.pixelSize: Theme.fontSizeTitle; font.bold: true
+                            width: root.width - 32 - statusLbl.width - 16
+                            horizontalAlignment: Text.AlignRight
+                            text: root.order.station_name || ""
+                            color: "#ffffff"; font.pixelSize: Theme.fontSizeSmall; font.bold: true
+                            elide: Text.ElideRight
                         }
-                        Item { width: 1; height: 1 }
-                        Column {
-                            anchors.verticalCenter: parent.verticalCenter; anchors.right: parent.right
-                            spacing: 2
-                            Text { horizontalAlignment: Text.AlignRight; text: root.order.station_name || ""; color: "#ffffff"; font.pixelSize: Theme.fontSizeSmall; font.bold: true }
-                            Text { horizontalAlignment: Text.AlignRight; text: (root.order.charger_code || "") + " · " + root.typeText(root.order.charger_type); color: "#E6F0FF"; font.pixelSize: Theme.fontSizeTiny }
+                        Text {
+                            horizontalAlignment: Text.AlignRight
+                            text: (root.order.charger_code || "") + " · " + root.typeText(root.order.charger_type)
+                            color: "#E6F0FF"; font.pixelSize: Theme.fontSizeTiny
                         }
                     }
                 }
@@ -362,19 +376,20 @@ Item {
                             delegate: Row {
                                 width: parent.width
                                 height: nodeCol.implicitHeight + 10
-                                // 左侧圆点 + 竖线
-                                Column {
+                                spacing: 0
+                                // 左侧圆点 + 竖线（用 Item 不用 Column，避免 Column 内 children 的 vertical anchors 违规）
+                                Item {
                                     width: 16; height: parent.height
                                     Rectangle {
                                         x: 4; width: 8; height: 8; radius: 4
-                                        anchors.top: parent.top; anchors.topMargin: 2
+                                        y: 2
                                         color: Theme.primary
                                     }
                                     Rectangle {
                                         visible: index < root.timeline.length - 1
                                         x: 7; width: 2
-                                        anchors.top: parent.top; anchors.topMargin: 12
-                                        anchors.bottom: parent.bottom
+                                        y: 12
+                                        height: parent.height - 12
                                         color: Theme.border
                                     }
                                 }
@@ -434,7 +449,56 @@ Item {
                 }
             }
         }
+
+        // —— 待支付大按钮（仅 pending_settle 订单显示）——
+        Rectangle {
+            visible: (selectedOrderId !== 0) && (order.status === "pending_settle")
+            anchors.left: parent.left; anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            height: 96; color: "#00000000"
+
+            Rectangle {
+                width: parent.width - 32; x: 16
+                height: 52; radius: 26
+                color: Theme.danger
+                anchors.verticalCenter: parent.verticalCenter
+                Text {
+                    anchors.centerIn: parent
+                    text: qsTr("立即支付 ¥") + (Number(order.pay_amount || 0).toFixed(2))
+                    color: "#ffffff"; font.bold: true; font.pixelSize: Theme.fontSizeBase
+                }
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: {
+                        // 模拟从余额扣款：余额足够 → 支付成功（转 completed），否则提示充值
+                        var pay = Number(order.pay_amount || 0)
+                        var bal = Number(UserData.profile().balance || 0)
+                        if (bal >= pay) {
+                            if (UserData.recharge(-pay)) {
+                                showToast(qsTr("支付成功，已从余额扣款 ¥") + pay.toFixed(2))
+                                // 模拟订单状态更新（实际由服务端改，这里返回列表即可）
+                                root.selectedOrderId = 0
+                            }
+                        } else {
+                            showToast(qsTr("余额不足，还差 ¥") + (pay - bal).toFixed(2) + qsTr("，请先充值"))
+                        }
+                    }
+                }
+            }
+        }
     }
+
+    // 轻提示
+    Rectangle {
+        id: toast; visible: false
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom; anchors.bottomMargin: 140
+        width: Math.min(toastText.implicitWidth + 32, root.width - 48)
+        height: 40; radius: 20; color: "#B3000000"; z: 30
+        Text { id: toastText; anchors.centerIn: parent; color: "#ffffff"; font.pixelSize: Theme.fontSizeSmall }
+    }
+    Timer { id: toastTimer; interval: 2000; onTriggered: toast.visible = false }
+    function showToast(msg) { toastText.text = msg; toast.visible = true; toastTimer.restart() }
 
     // 报告一句话评价：按电费单价比对历史平均
     function evaluation() {
