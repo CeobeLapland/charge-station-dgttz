@@ -1,0 +1,4 @@
+# admin 本地构建产物与依赖隔离目录
+build/
+third_party/
+*.user
