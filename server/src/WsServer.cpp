@@ -8,6 +8,7 @@
 #include <cmath>
 
 #include "AdminDao.h"
+#include "ScreenDao.h"
 #include "StationDao.h"
 #include "UserDao.h"
 
@@ -163,7 +164,11 @@ void WsServer::onTextMessage(const QString &message)
     const QJsonObject respPayload = dispatch(sock, type, payload, code, msg);
 
     // ---- 拼响应信封并回发 ----
-    reply = QJsonObject{{"type", type + QStringLiteral("_resp")}, {"seq", seq},
+    // 约定: 响应类型 = 请求类型 + "_resp"; 唯一的例外是心跳, 协议规定回 system.pong
+    const QString respType = (type == QStringLiteral("system.ping"))
+                                 ? QStringLiteral("system.pong")
+                                 : type + QStringLiteral("_resp");
+    reply = QJsonObject{{"type", respType}, {"seq", seq},
                         {"code", code}, {"message", msg}, {"payload", respPayload}};
     sock->sendTextMessage(QString::fromUtf8(QJsonDocument(reply).toJson(QJsonDocument::Compact)));
 }
@@ -193,6 +198,10 @@ QJsonObject WsServer::dispatch(QWebSocket *sock, const QString &type, const QJso
     if (type == QStringLiteral("admin.user_toggle_status")) return handleAdminUserToggleStatus(sock, payload, code, message);
     if (type == QStringLiteral("admin.device_log"))     return handleAdminDeviceLog(sock, payload, code, message);
     if (type == QStringLiteral("admin.fault_risk"))     return handleAdminFaultRisk(sock, payload, code, message);
+
+    // ---- 数据大屏(免登录只读) ----
+    if (type == QStringLiteral("screen.snapshot"))      return handleScreenSnapshot(sock, payload, code, message);
+    if (type == QStringLiteral("ml.forecast"))          return handleMlForecast(sock, payload, code, message);
 
     // 9002: 未知/未实现的消息 —— 响亮地失败, 并说清找谁
     code = 9002;
@@ -545,4 +554,96 @@ QJsonObject WsServer::handleAdminFaultRisk(QWebSocket *sock, const QJsonObject &
         arr.append(QJsonObject{{"charger_id", r.chargerId}, {"health_score", r.healthScore},
                                {"risk_level", r.riskLevel}, {"suggestion", r.suggestion}});
     return QJsonObject{{"risks", arr}};
+}
+
+// ==================================================================
+//                        数据大屏 screen.*
+// ==================================================================
+
+// ---------- screen.snapshot: 大屏全量初始数据(免登录只读) ----------
+QJsonObject WsServer::handleScreenSnapshot(QWebSocket *, const QJsonObject &payload,
+                                           int &, QString &)
+{
+    const int hours = payload.value(QStringLiteral("hours")).toInt(24);
+    const int days  = payload.value(QStringLiteral("days")).toInt(7);
+
+    // --- metrics ---
+    const auto m = dao::screenMetrics();
+    const QJsonObject metrics{
+        {"today_revenue", m.todayRevenue}, {"today_orders", m.todayOrders},
+        {"charging_count", m.chargingCount}, {"online_rate", m.onlineRate},
+        {"revenue_change_pct", m.revenueChangePct},
+        {"orders_change_pct", m.ordersChangePct},
+    };
+
+    // --- stations ---
+    QJsonArray stations;
+    for (const auto &s : dao::screenStations())
+        stations.append(QJsonObject{
+            {"id", s.id}, {"name", s.name},
+            {"longitude", s.longitude}, {"latitude", s.latitude},
+            {"load_rate", s.loadRate}, {"idle_chargers", s.idleChargers},
+            {"total_chargers", s.totalChargers}, {"today_revenue", s.todayRevenue},
+        });
+
+    // --- load_series: actual 来自 charging_measure; forecast 待机器学习模块接入 ---
+    QJsonArray actual;
+    for (const auto &p : dao::loadSeriesActual(hours))
+        actual.append(QJsonObject{{"timestamp", p.timestamp}, {"value_kw", p.valueKw}});
+
+    // --- utilization_rank ---
+    QJsonArray util;
+    for (const auto &r : dao::utilizationRank(10))
+        util.append(QJsonObject{{"station_id", r.stationId},
+                                {"station_name", r.stationName},
+                                {"utilization_rate", r.utilizationRate}});
+
+    // --- alarms ---
+    QJsonArray alarms;
+    for (const auto &a : dao::recentAlarms(20)) {
+        QJsonObject o{
+            {"id", a.id}, {"station_id", a.stationId}, {"station_name", a.stationName},
+            {"type", a.type}, {"level", a.level}, {"status", a.status},
+            {"occur_time", a.occurTime},
+        };
+        // 站点级告警没有电桩, 按契约输出 null 而不是 0
+        o.insert(QStringLiteral("charger_id"),
+                 a.chargerId > 0 ? QJsonValue(a.chargerId) : QJsonValue());
+        alarms.append(o);
+    }
+
+    // --- user_growth ---
+    QJsonArray growth;
+    for (const auto &g : dao::userGrowth(days))
+        growth.append(QJsonObject{{"date", g.date}, {"new_users", g.newUsers}});
+
+    // --- energy_by_price_level ---
+    const auto e = dao::energyByPriceLevel();
+
+    // --- events ---
+    QJsonArray events;
+    for (const auto &v : dao::recentEvents(20))
+        events.append(QJsonObject{{"id", v.id}, {"event_time", v.eventTime},
+                                  {"event_type", v.eventType}, {"text", v.text}});
+
+    return QJsonObject{
+        {"metrics", metrics},
+        {"stations", stations},
+        {"load_series", QJsonObject{{"actual", actual}, {"forecast", QJsonArray{}}}},
+        {"utilization_rank", util},
+        {"alarms", alarms},
+        {"user_growth", growth},
+        {"energy_by_price_level", QJsonObject{
+            {"valley", e.valley}, {"flat", e.flat}, {"peak", e.peak}}},
+        {"events", events},
+    };
+}
+
+// ---------- ml.forecast: 机器学习模块尚未接入 ----------
+QJsonObject WsServer::handleMlForecast(QWebSocket *, const QJsonObject &, int &code, QString &message)
+{
+    // 按 API_CONTRACT 第 9 节: 5001 = 预测/模型不可用, 大屏保留实际曲线并显示"预测不可用"
+    code = 5001;
+    message = QStringLiteral("负荷预测模块尚未接入, 请先使用 load_series.actual");
+    return {};
 }

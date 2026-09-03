@@ -33,7 +33,7 @@ struct StatusDistribution {
     int total = 0;
 };
 
-// 电站全字段(管理端表格用, 比 StationView 多几列)
+// 电站全字段
 struct StationFull {
     int     id = 0;
     QString name, address, area;

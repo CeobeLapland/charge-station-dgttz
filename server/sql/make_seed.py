@@ -20,7 +20,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 DB   = os.path.join(HERE, "charge.db")
 # 种子基准时刻 = 今天中午。写死日期会导致跑到第二天时"今日营收"变成 0,
 # 演示当天数据必须"活"到今天。random.seed 固定, 同一天生成的库内容仍完全一致。
-NOW  = datetime.now().replace(hour=12, minute=0, second=0, microsecond=0)
+NOW  = datetime.now().replace(second=0, microsecond=0)   # 基准 = 此刻
 
 def ts(dt):  return dt.strftime("%Y-%m-%d %H:%M:%S")
 
@@ -148,11 +148,11 @@ def main():
         base = NOW - timedelta(days=day)
         n = random.randint(16, 22) if base.weekday() < 5 else random.randint(10, 15)
         if day == 0:
-            n = max(5, n // 2)          # 今天才过了半天, 订单量减半
+            n = max(5, n * max(1, NOW.hour) // 24)   # 今天只过了一部分, 订单量按比例缩减
         for _ in range(n):
             hour = random.choices(range(24), weights=hour_weight)[0]
             if day == 0:
-                hour %= 11              # NOW 是中午, 今天的订单只发生在上午
+                hour = random.randrange(0, max(1, NOW.hour))   # 今天的订单只能发生在已过去的小时里
             uid  = random.randint(1, 5)
             cid, sid, typ, power = random.choice(chargers)
             dur  = random.randint(40, 90) if typ == "fast" else random.randint(120, 300)
@@ -239,6 +239,30 @@ def main():
                  VALUES(33,4,'offline','warning',?,'handled','repair')""", (ts(NOW - timedelta(days=3)),))
     c.execute("""INSERT INTO device_log(charger_id,action,operator,op_time,result)
                  VALUES(7,'restart','admin',?,'failed')""", (ts(NOW - timedelta(days=1, hours=1)),))
+    # 近 7 日注册的散户: 大屏"用户增长"曲线需要样本, 否则 7 天全是 0。
+    # 这些用户不下单, 只用于增长曲线; 主测试账号仍是 13800000001~5。
+    for k in range(15):
+        d_ago = k % 7
+        c.execute("""INSERT INTO user(phone,nickname,balance,points,level,status,register_time,last_login_time)
+                     VALUES(?,?,?,?,'normal','normal',?,?)""",
+                  (f"1370000{k:04d}", f"新用户{k+1:02d}",
+                   round(random.uniform(0, 80), 2), random.randint(0, 200),
+                   ts(NOW - timedelta(days=d_ago, hours=random.randint(1, 10))),
+                   ts(NOW - timedelta(days=d_ago, hours=random.randint(0, 5)))))
+
+    # 大屏告警面板需要多几条不同级别/类型的样本, 否则只有两行, 演示时很空
+    for a_cid, a_sid, a_type, a_lvl, a_hrs, a_status in [
+        (10, 1, 'overheat',      'critical', 3,  'open'),
+        (21, 3, 'power_drop',    'warning',  6,  'open'),
+        (41, 5, 'offline',       'warning',  9,  'handled'),
+        (15, 2, 'user_behavior', 'info',     14, 'handled'),
+        (30, 3, 'comm_abnormal', 'warning',  20, 'open'),
+    ]:
+        c.execute("""INSERT INTO alarm(charger_id,station_id,type,level,occur_time,status,handle_action)
+                     VALUES(?,?,?,?,?,?,?)""",
+                  (a_cid, a_sid, a_type, a_lvl, ts(NOW - timedelta(hours=a_hrs)), a_status,
+                   'repair' if a_status == 'handled' else ''))
+
     c.execute("""INSERT INTO notification(user_id,type,title,content,related_id,is_read,create_time)
                  VALUES(1,'order','充电进行中','您在高新软件园站的充电已开始',?,0,?)""", (active_oid, ts(st)))
 
