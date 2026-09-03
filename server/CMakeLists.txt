@@ -19,6 +19,8 @@ qt_add_executable(charge_server
     src/UserDao.cpp
     src/StationDao.h
     src/StationDao.cpp
+    src/AdminDao.h
+    src/AdminDao.cpp
     src/WsServer.h
     src/WsServer.cpp
 )

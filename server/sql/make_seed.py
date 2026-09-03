@@ -18,7 +18,9 @@ from datetime import datetime, timedelta
 random.seed(42)                      # 固定随机种子, 每次生成结果一致, 方便联调对数
 HERE = os.path.dirname(os.path.abspath(__file__))
 DB   = os.path.join(HERE, "charge.db")
-NOW  = datetime(2026, 9, 1, 12, 0, 0)   # 种子基准时刻(演示日中午)
+# 种子基准时刻 = 今天中午。写死日期会导致跑到第二天时"今日营收"变成 0,
+# 演示当天数据必须"活"到今天。random.seed 固定, 同一天生成的库内容仍完全一致。
+NOW  = datetime.now().replace(hour=12, minute=0, second=0, microsecond=0)
 
 def ts(dt):  return dt.strftime("%Y-%m-%d %H:%M:%S")
 
@@ -84,6 +86,14 @@ def main():
             fault_code, comm, health = "", "normal", random.randint(88, 100)
             if (sid, i) in fault_assigned:
                 status, fault_code, comm, health = "fault", "E-0301", "abnormal", random.randint(35, 55)
+            # 状态分布多样化: 管理端首页的状态环形图/大屏需要 idle 以外的样本,
+            # 否则演示时 50 台桩全是 idle, 图形毫无信息量。
+            elif (sid + i) % 7 == 0:
+                status, health = "charging", random.randint(75, 95)
+            elif (sid + i) % 11 == 0:
+                status = "reserved"
+            elif i == 10 and sid % 2 == 1:
+                status, comm, health = "offline", "abnormal", random.randint(60, 80)
             c.execute("""INSERT INTO charger(code,station_id,type,power,status,voltage,current,temperature,
                          fault_code,comm_status,health_score,total_charge_count,total_charge_duration,created_time)
                          VALUES(?,?,?,?,?,0,0,?,?,?,?,0,0,?)""",
@@ -133,11 +143,16 @@ def main():
     points   = {i: 0   for i in range(1, 6)}
     charger_stat = {cid: [0, 0] for cid, *_ in chargers}                 # cid -> [次数, 分钟]
     order_rows = 0
-    for day in range(30, 0, -1):
+    # day=0 即"今天": 必须有订单, 否则管理端首页的"今日营收"永远是 0
+    for day in range(30, -1, -1):
         base = NOW - timedelta(days=day)
         n = random.randint(16, 22) if base.weekday() < 5 else random.randint(10, 15)
+        if day == 0:
+            n = max(5, n // 2)          # 今天才过了半天, 订单量减半
         for _ in range(n):
             hour = random.choices(range(24), weights=hour_weight)[0]
+            if day == 0:
+                hour %= 11              # NOW 是中午, 今天的订单只发生在上午
             uid  = random.randint(1, 5)
             cid, sid, typ, power = random.choice(chargers)
             dur  = random.randint(40, 90) if typ == "fast" else random.randint(120, 300)
@@ -286,8 +301,8 @@ def main():
     # 商户汇总回填 (大学城站=3)
     c.execute("""UPDATE merchant SET
                  order_count=(SELECT COUNT(*) FROM charging_order WHERE station_id=3),
-                 settle_amount=(SELECT ROUND(SUM(pay_amount),2) FROM charging_order WHERE station_id=3 AND status='completed'),
-                 service_score=(SELECT ROUND(AVG(overall_score),2) FROM review WHERE station_id=3)
+                 settle_amount=IFNULL((SELECT ROUND(SUM(pay_amount),2) FROM charging_order WHERE station_id=3 AND status='completed'),0),
+                 service_score=IFNULL((SELECT ROUND(AVG(overall_score),2) FROM review WHERE station_id=3),0)
                  WHERE id=1""")
 
     con.commit()
