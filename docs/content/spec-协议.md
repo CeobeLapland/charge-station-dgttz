@@ -44,7 +44,7 @@
 | ---- | ---- | ---- | ------------ |
 | `user.login` | C→S | 手机号免密登录（不存在则自动注册） | phone |
 | `user.login_resp` | S→C | 登录结果 | user 对象 |
-| `user.info` | C→S | 获取当前用户信息 | — |
+| `user.info` | C→S | 获取当前用户信息 | 身份取自 WebSocket 连接，不传 user_id |
 | `user.info_resp` | S→C | 用户信息 + 充电画像 | user, portrait |
 | `user.recharge` | C→S | 余额充值（模拟支付） | amount |
 | `user.recharge_resp` | S→C | 充值结果 | balance |
@@ -200,6 +200,7 @@
 | 1001 | 账号或密码错误 |
 | 1002 | 手机号格式错误 |
 | 1003 | 用户已被冻结 |
+| 1004 | 未登录 |
 | 2001 | 存在未完成的充电订单 |
 | 2002 | 余额不足 |
 | 2003 | 订单状态不允许该操作 |
