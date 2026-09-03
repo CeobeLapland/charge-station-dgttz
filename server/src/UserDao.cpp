@@ -6,7 +6,7 @@
 
 namespace {
 
-// 把查询结果的当前行转成 User 结构体(列顺序与下面的 SELECT 保持一致)
+// 把查询结果的当前行转成User结构体
 User rowToUser(const QSqlQuery &q)
 {
     User u;
@@ -21,9 +21,13 @@ User rowToUser(const QSqlQuery &q)
     return u;
 }
 
-const char *kSelectUser =
+const char *kSelectUserByPhone =
     "SELECT id, phone, nickname, avatar_path, balance, points, level, status "
     "FROM user WHERE phone = ?";
+
+const char *kSelectUserById =
+    "SELECT id, phone, nickname, avatar_path, balance, points, level, status "
+    "FROM user WHERE id = ?";
 
 QString now()
 {
@@ -36,11 +40,19 @@ namespace dao {
 
 std::optional<User> findUserByPhone(const QString &phone)
 {
-    // prepare + addBindValue 是"参数化查询": 用户输入永远只当数据, 不会被
-    // 拼进 SQL 文本 —— 这是防 SQL 注入的标准做法(数据安全考虑的得分点)。
     QSqlQuery q;
-    q.prepare(kSelectUser);
+    q.prepare(kSelectUserByPhone);
     q.addBindValue(phone);
+    if (!q.exec() || !q.next())
+        return std::nullopt;
+    return rowToUser(q);
+}
+
+std::optional<User> findUserById(int id)
+{
+    QSqlQuery q;
+    q.prepare(kSelectUserById);
+    q.addBindValue(id);
     if (!q.exec() || !q.next())
         return std::nullopt;
     return rowToUser(q);
@@ -50,7 +62,7 @@ std::optional<User> loginOrRegister(const QString &phone, bool *created)
 {
     if (created) *created = false;
 
-    // 手机号必须是 11 位数字(规格要求), 不合法直接拒绝
+    // 手机号必须是 11 位数字
     if (phone.size() != 11 || phone.toLongLong() == 0)
         return std::nullopt;
 
@@ -63,7 +75,7 @@ std::optional<User> loginOrRegister(const QString &phone, bool *created)
         return existing;
     }
 
-    // 不存在 → 自动注册。昵称 = "用户" + 后4位(规格约定)。
+    // 不存在 → 自动注册 昵称 = "用户" + 后4位
     QSqlQuery ins;
     ins.prepare(QStringLiteral(
         "INSERT INTO user(phone, nickname, register_time, last_login_time) "

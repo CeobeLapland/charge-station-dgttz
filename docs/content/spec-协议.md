@@ -38,13 +38,46 @@
 
 ## 消息类型字典
 
+### 数据大屏（免登录只读）
+
+| type | 方向 | 说明 | payload 要点 |
+| ---- | ---- | ---- | ------------ |
+| `screen.snapshot` | C→S | 大屏全量初始数据（首连/重连时请求） | 可选 hours(默认24)、days(默认7) |
+| `screen.snapshot_resp` | S→C | 全量快照 | metrics, stations[], load_series, utilization_rank[], alarms[], user_growth[], energy_by_price_level, events[] |
+| `ml.forecast` | C→S | 主动查询负荷预测 | station_id, horizon |
+| `ml.forecast_resp` | S→C | **当前返回 5001（模型未接入）** | — |
+
+`screen.snapshot_resp.payload` 结构见 `screen/API_CONTRACT.md` 第 4 节，服务端已按该结构实现。
+
+## 统计口径（服务端唯一定义，管理端与大屏必须一致）
+
+| 指标 | 口径 |
+| ---- | ---- |
+| `today_*` | 今天 00:00:00 至此刻（本地时间） |
+| `today_orders` | 今日**创建**的订单数，按 `charging_order.create_time`，不论最终状态 |
+| `today_revenue` | 今日已结算订单（`status='completed'`）的 `pay_amount` 合计 |
+| `online_rate` | 在线桩 / 总桩 × 100，**返回 0–100**；在线 = `status NOT IN ('offline','fault')` |
+| `load_rate`（站点） | 该站 `charging` 桩数 / 该站总桩数 × 100 |
+| `utilization_rate`（站点） | 该站今日订单 `duration_min` 合计 / (该站桩数 × 今日已过分钟数) × 100，上限 100 |
+| `*_change_pct` | (今日值 − 昨日同期值) / 昨日同期值 × 100；昨日同期为 0 时返回 0。**"同期"= 昨天 00:00 到昨天的此刻**，不拿半天比一整天 |
+| `energy_by_price_level` | **近 7 日**已结算订单按 `price_level` 聚合（不是今日：今日峰时段可能还没到，只统计今日会让 peak 恒为 0） |
+| 时间格式 | 一律本地时间 `yyyy-MM-dd HH:mm:ss`，不使用 UTC / ISO 8601 |
+
+## 心跳的例外
+
+响应类型的通用规则是「请求 type + `_resp`」，**唯一例外是心跳**：`system.ping` 的响应 type 是 `system.pong`（不是 `system.ping_resp`），但仍然带 `seq` / `code` / `message`，与其他响应一致。
+
+## 事件流与脱敏
+
+`events[]` 与 `push.order_event` 中的 `text` 由服务端生成，手机号已打码为 `138****0001`。**服务端不会发出完整手机号**，各端直接显示即可，不需要自行脱敏。事件 `id` 形如 `evt-o<订单id>-<事件类型>`，稳定唯一，可用于去重。
+
 ### 用户端
 
 | type | 方向 | 说明 | payload 要点 |
 | ---- | ---- | ---- | ------------ |
 | `user.login` | C→S | 手机号免密登录（不存在则自动注册） | phone |
 | `user.login_resp` | S→C | 登录结果 | user 对象 |
-| `user.info` | C→S | 获取当前用户信息 | — |
+| `user.info` | C→S | 获取当前用户信息 | 身份取自 WebSocket 连接，不传 user_id |
 | `user.info_resp` | S→C | 用户信息 + 充电画像 | user, portrait |
 | `user.recharge` | C→S | 余额充值（模拟支付） | amount |
 | `user.recharge_resp` | S→C | 充值结果 | balance |
@@ -200,6 +233,7 @@
 | 1001 | 账号或密码错误 |
 | 1002 | 手机号格式错误 |
 | 1003 | 用户已被冻结 |
+| 1004 | 未登录 |
 | 2001 | 存在未完成的充电订单 |
 | 2002 | 余额不足 |
 | 2003 | 订单状态不允许该操作 |

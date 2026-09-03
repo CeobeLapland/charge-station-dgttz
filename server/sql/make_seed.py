@@ -18,7 +18,9 @@ from datetime import datetime, timedelta
 random.seed(42)                      # 固定随机种子, 每次生成结果一致, 方便联调对数
 HERE = os.path.dirname(os.path.abspath(__file__))
 DB   = os.path.join(HERE, "charge.db")
-NOW  = datetime(2026, 9, 1, 12, 0, 0)   # 种子基准时刻(演示日中午)
+# 种子基准时刻 = 今天中午。写死日期会导致跑到第二天时"今日营收"变成 0,
+# 演示当天数据必须"活"到今天。random.seed 固定, 同一天生成的库内容仍完全一致。
+NOW  = datetime.now().replace(second=0, microsecond=0)   # 基准 = 此刻
 
 def ts(dt):  return dt.strftime("%Y-%m-%d %H:%M:%S")
 
@@ -84,6 +86,14 @@ def main():
             fault_code, comm, health = "", "normal", random.randint(88, 100)
             if (sid, i) in fault_assigned:
                 status, fault_code, comm, health = "fault", "E-0301", "abnormal", random.randint(35, 55)
+            # 状态分布多样化: 管理端首页的状态环形图/大屏需要 idle 以外的样本,
+            # 否则演示时 50 台桩全是 idle, 图形毫无信息量。
+            elif (sid + i) % 7 == 0:
+                status, health = "charging", random.randint(75, 95)
+            elif (sid + i) % 11 == 0:
+                status = "reserved"
+            elif i == 10 and sid % 2 == 1:
+                status, comm, health = "offline", "abnormal", random.randint(60, 80)
             c.execute("""INSERT INTO charger(code,station_id,type,power,status,voltage,current,temperature,
                          fault_code,comm_status,health_score,total_charge_count,total_charge_duration,created_time)
                          VALUES(?,?,?,?,?,0,0,?,?,?,?,0,0,?)""",
@@ -133,11 +143,16 @@ def main():
     points   = {i: 0   for i in range(1, 6)}
     charger_stat = {cid: [0, 0] for cid, *_ in chargers}                 # cid -> [次数, 分钟]
     order_rows = 0
-    for day in range(30, 0, -1):
+    # day=0 即"今天": 必须有订单, 否则管理端首页的"今日营收"永远是 0
+    for day in range(30, -1, -1):
         base = NOW - timedelta(days=day)
         n = random.randint(16, 22) if base.weekday() < 5 else random.randint(10, 15)
+        if day == 0:
+            n = max(5, n * max(1, NOW.hour) // 24)   # 今天只过了一部分, 订单量按比例缩减
         for _ in range(n):
             hour = random.choices(range(24), weights=hour_weight)[0]
+            if day == 0:
+                hour = random.randrange(0, max(1, NOW.hour))   # 今天的订单只能发生在已过去的小时里
             uid  = random.randint(1, 5)
             cid, sid, typ, power = random.choice(chargers)
             dur  = random.randint(40, 90) if typ == "fast" else random.randint(120, 300)
@@ -224,6 +239,30 @@ def main():
                  VALUES(33,4,'offline','warning',?,'handled','repair')""", (ts(NOW - timedelta(days=3)),))
     c.execute("""INSERT INTO device_log(charger_id,action,operator,op_time,result)
                  VALUES(7,'restart','admin',?,'failed')""", (ts(NOW - timedelta(days=1, hours=1)),))
+    # 近 7 日注册的散户: 大屏"用户增长"曲线需要样本, 否则 7 天全是 0。
+    # 这些用户不下单, 只用于增长曲线; 主测试账号仍是 13800000001~5。
+    for k in range(15):
+        d_ago = k % 7
+        c.execute("""INSERT INTO user(phone,nickname,balance,points,level,status,register_time,last_login_time)
+                     VALUES(?,?,?,?,'normal','normal',?,?)""",
+                  (f"1370000{k:04d}", f"新用户{k+1:02d}",
+                   round(random.uniform(0, 80), 2), random.randint(0, 200),
+                   ts(NOW - timedelta(days=d_ago, hours=random.randint(1, 10))),
+                   ts(NOW - timedelta(days=d_ago, hours=random.randint(0, 5)))))
+
+    # 大屏告警面板需要多几条不同级别/类型的样本, 否则只有两行, 演示时很空
+    for a_cid, a_sid, a_type, a_lvl, a_hrs, a_status in [
+        (10, 1, 'overheat',      'critical', 3,  'open'),
+        (21, 3, 'power_drop',    'warning',  6,  'open'),
+        (41, 5, 'offline',       'warning',  9,  'handled'),
+        (15, 2, 'user_behavior', 'info',     14, 'handled'),
+        (30, 3, 'comm_abnormal', 'warning',  20, 'open'),
+    ]:
+        c.execute("""INSERT INTO alarm(charger_id,station_id,type,level,occur_time,status,handle_action)
+                     VALUES(?,?,?,?,?,?,?)""",
+                  (a_cid, a_sid, a_type, a_lvl, ts(NOW - timedelta(hours=a_hrs)), a_status,
+                   'repair' if a_status == 'handled' else ''))
+
     c.execute("""INSERT INTO notification(user_id,type,title,content,related_id,is_read,create_time)
                  VALUES(1,'order','充电进行中','您在高新软件园站的充电已开始',?,0,?)""", (active_oid, ts(st)))
 
@@ -286,8 +325,8 @@ def main():
     # 商户汇总回填 (大学城站=3)
     c.execute("""UPDATE merchant SET
                  order_count=(SELECT COUNT(*) FROM charging_order WHERE station_id=3),
-                 settle_amount=(SELECT ROUND(SUM(pay_amount),2) FROM charging_order WHERE station_id=3 AND status='completed'),
-                 service_score=(SELECT ROUND(AVG(overall_score),2) FROM review WHERE station_id=3)
+                 settle_amount=IFNULL((SELECT ROUND(SUM(pay_amount),2) FROM charging_order WHERE station_id=3 AND status='completed'),0),
+                 service_score=IFNULL((SELECT ROUND(AVG(overall_score),2) FROM review WHERE station_id=3),0)
                  WHERE id=1""")
 
     con.commit()
