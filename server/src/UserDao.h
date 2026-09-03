@@ -25,6 +25,9 @@ namespace dao {
 // 按手机号查用户。查到返回 User, 查不到返回 std::nullopt。
 std::optional<User> findUserByPhone(const QString &phone);
 
+// 按主键 id 查用户。会话绑定后, 服务端一律用 id 取当前用户(见 WsServer::userIdOf)。
+std::optional<User> findUserById(int id);
+
 // 免密登录: 手机号存在 → 更新 last_login_time 并返回;
 //           不存在   → 自动注册(昵称 = "用户" + 手机号后4位)再返回。
 // created 不为空时回写"本次是否新注册"。
