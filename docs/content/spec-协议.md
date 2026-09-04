@@ -269,6 +269,41 @@ reserved ──order.start──> charging ──order.finish──> pending_set
 
 `charging_order`（转 completed）、`user`（扣余额、积分净变化）、`wallet_transaction`（消费流水）、`point_record`（获得/抵扣各一条）、`order_timeline`（settled 节点）。任何一步失败整体回滚。
 
+### 充电过程实时推送（服务端已实现）
+
+`order.start` 之后，服务端启动仿真：**每 1 秒推进 1 分钟**的充电过程（60 倍速），
+并向**该用户的连接定向推送** `push.order_progress`（不广播给其他端）：
+
+```json
+{
+  "type": "push.order_progress",
+  "payload": {
+    "order_id": 533, "charger_id": 1, "station_id": 1,
+    "soc": 31.0, "power_kw": 60, "energy": 8.28, "cost": 12.42, "eta": 60
+  }
+}
+```
+
+| 字段 | 单位 | 说明 |
+| ---- | ---- | ---- |
+| `soc` | % | 当前电量 |
+| `power_kw` | kW | 当前功率（SOC ≥ 80% 减半，≥ 95% 再减半，模拟涓流） |
+| `energy` | kWh | 本次累计充入 |
+| `cost` | 元 | 累计费用（含服务费） |
+| `eta` | 分钟 | 距离目标电量的剩余时间 |
+| `finished` | bool | 仅在自动充满那一条出现，值为 `true` |
+
+**充到目标电量会自动结束充电**（订单转 `pending_settle`），此时推送带 `finished: true`，
+并广播 `push.charger_status`（status 变 `idle`）和 `push.order_event`（`target_reached`）。
+
+同时每 15 秒往 `charging_measure` 落一条时序点，并广播一次 `push.charger_status`
+（带 `soc` / `power_kw` / `temperature`），供大屏刷新负荷曲线与设备面板。
+
+> **`order.finish` 不传 `end_soc` 时**，服务端用仿真器算到的当前电量结算。
+> 客户端不需要自己维护 SOC，直接用推送里的值显示即可。
+
+
+
 ## 错误码
 
 | code | 含义 |
