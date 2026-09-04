@@ -18,8 +18,10 @@ Item {
     readonly property var myLoc: { "lng": 116.397128, "lat": 39.916527 }   // 模拟定位（北京·朝阳）
     readonly property var stationsAll: ExploreData.stations()
     readonly property var vehiclesData: UserData.vehicles()
-    readonly property var chargingOrders: {                                // 正在充电订单（可多笔）
+    readonly property var chargingOrders: {          // 正在充电订单：实时流程优先级高（可多笔种子兜底）
         var out = []
+        var cur = ChargingFlow.currentOrder
+        if (cur && cur.live) out.push(cur)
         var all = UserData.orders()
         for (var i = 0; i < all.length; i++)
             if (all[i].status === "charging") out.push(all[i])
@@ -412,25 +414,46 @@ Item {
                                 spacing: 8; width: parent.width
                                 Text { text: "\u{26A1}"; font.pixelSize: 14 }
                                 Text {
-                                    width: 210
+                                    width: modelData.live ? 150 : 210
                                     text: modelData.station_name || ""
                                     color: "#ffffff"; font.bold: true; font.pixelSize: Theme.fontSizeSmall
                                     elide: Text.ElideRight
+                                }
+                                // 实时订单：标注「实时」角标
+                                Rectangle {
+                                    visible: !!modelData.live
+                                    width: 30; height: 16; radius: 4
+                                    color: "#33FFFFFF"
+                                    Text { anchors.centerIn: parent; text: qsTr("实时"); color: "#ffffff"; font.pixelSize: 9 }
                                 }
                             }
                             Row { spacing: 12
                                 Text { text: modelData.charger_code || ""; color: "#E6F0FF"; font.pixelSize: Theme.fontSizeTiny }
                                 Text { text: (modelData.charger_type === "fast" ? qsTr("快充") : qsTr("慢充")); color: "#E6F0FF"; font.pixelSize: Theme.fontSizeTiny }
                                 Text {
-                                    text: qsTr("电量 ") + Number(modelData.start_soc || 0) + "% → " + Number(modelData.target_soc || 0) + "%"
                                     color: "#ffffff"; font.pixelSize: Theme.fontSizeTiny; font.bold: true
+                                    text: modelData.live
+                                          ? (modelData.status === "pending_settle"
+                                             ? qsTr("待结算")
+                                             : qsTr("电量 ") + Math.round(Number(modelData.soc || modelData.start_soc || 0)) + "%（目标 " + Number(modelData.target_soc || 0) + "%）")
+                                          : qsTr("电量 ") + Number(modelData.start_soc || 0) + "% → " + Number(modelData.target_soc || 0) + "%"
                                 }
                             }
                         }
                         MouseArea {
                             anchors.fill: parent
-                            onClicked: root.stackView.push("qrc:/UserClient/qml/pages/OrderPage.qml",
-                                            { initialStatus: "charging", selectedOrderId: modelData.id })
+                            onClicked: {
+                                if (modelData.live) {
+                                    // 实时流程：充电中→充电页；待结算→结算页
+                                    root.stackView.push(modelData.status === "pending_settle"
+                                        ? "qrc:/UserClient/qml/pages/SettlePage.qml"
+                                        : "qrc:/UserClient/qml/pages/ChargingPage.qml")
+                                } else {
+                                    // 种子历史订单：进订单详情
+                                    root.stackView.push("qrc:/UserClient/qml/pages/OrderPage.qml",
+                                                    { initialStatus: "charging", selectedOrderId: modelData.id })
+                                }
+                            }
                         }
                     }
                 }

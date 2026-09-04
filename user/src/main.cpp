@@ -14,6 +14,7 @@
 #include "ExploreData.h"
 #include "UserData.h"
 #include "ChatData.h"
+#include "ChargingFlow.h"
 
 int main(int argc, char *argv[]) {
     // 探索页地图使用 QtWebEngine 加载 MapLibre GL JS，需在创建 QGuiApplication 前初始化。
@@ -78,6 +79,12 @@ int main(int argc, char *argv[]) {
     // 消息中心会话 mock 数据：会话卡片 + 聊天消息（支持发送/删除/已读）。
     static ChatData chatData;
     qmlRegisterSingletonInstance("UserClient", 1, 0, "ChatData", &chatData);
+
+    // 充电全流程状态机（mock 服务端）。注入 ExploreData(种子 DB) 与 UserData(用户域)，
+    // 客户端负责表单/扫码/导航，服务端职责(排队/匹配/计价/违约)由本类 mock，接后端时替换为 WebSocket。
+    static ChargingFlow chargingFlow;
+    chargingFlow.setDataSources(&exploreData, &userData);
+    qmlRegisterSingletonInstance("UserClient", 1, 0, "ChargingFlow", &chargingFlow);
 
     const QUrl url(QStringLiteral("qrc:/UserClient/qml/Main.qml"));
     QObject::connect(

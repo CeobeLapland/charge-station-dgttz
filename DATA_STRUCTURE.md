@@ -1,6 +1,6 @@
 # DATA_STRUCTURE（数据结构总览）
 
-版本 v1 · 与 `spec-数据库.md`（冻结真相源）一对一映射。本文件是**干净的全量参考**：完整列出 v1 全部数据实体、字段、依赖与枚举；字段级定义、读写边界、种子数据以 `spec-数据库.md` 为准。
+版本 v1.1 · 与 `spec-数据库.md`（冻结真相源）一对一映射。本文件是**干净的全量参考**：完整列出 v1 全部数据实体、字段、依赖与枚举；字段级定义、读写边界、种子数据以 `spec-数据库.md` 为准。
 
 ## 设计原则
 
@@ -64,6 +64,7 @@ user_coupon
 | points | INTEGER | 累计可用积分 |
 | level | TEXT | normal / vip / enterprise |
 | status | TEXT | normal / frozen（冻结拒登录/充电） |
+| credit_score | INTEGER | 信用分（默认 100，违约负向扣减） |
 | register_time | TEXT | 注册时间 |
 | last_login_time | TEXT | 最近登录时间（可空） |
 
@@ -135,6 +136,12 @@ user_coupon
 | coupon_id | INTEGER · FK(user_coupon) | 核销券（可空） |
 | points_earned | INTEGER | 本单获得积分 |
 | create_time / settle_time | TEXT | 下单 / 结算时间 |
+| reserved_time | TEXT | 预约生效/期望开始时间（立即预约为匹配时刻，定时预约为期望开始时刻） |
+| scan_deadline | TEXT | 扫码启动截止时间（匹配后 + 保留窗口，超时未扫码转 cancelled） |
+| cancel_reason | TEXT | 取消原因：user_cancel / no_show / timeout / admin（可空） |
+| occupy_fee | REAL | 占位费（元，充满后未挪车按停车费累计，默认 0） |
+| occupy_min | INTEGER | 占位时长（分钟，默认 0） |
+| penalty_fee | REAL | 违约金（元，违约场景扣款，默认 0） |
 
 ### 6. reservation（预约/排队）—核心
 
@@ -149,6 +156,11 @@ user_coupon
 | estimate_start_time | TEXT | 预计开始时间 |
 | notified | INTEGER | 已推送轮队通知 0/1 |
 | status | TEXT | waiting / matched / cancelled |
+| reserve_type | TEXT | 预约类型：immediate_queue（即时排队）/ timed（定时预约） |
+| expect_time | TEXT | 期望开始时间（定时预约时刻 / 排队预测开始） |
+| matched_time | TEXT | 匹配到空闲桩的时间（可空，matched 后回填） |
+| expire_time | TEXT | 响应截止时间（matched 后 + 轮候窗口，超时顺延） |
+| cancel_reason | TEXT | 取消原因：user_cancel / timeout / no_show（可空） |
 
 ### 7. price_rule（分时电价）—核心
 
@@ -296,7 +308,7 @@ user_coupon
 | ---- | ---- | ---- |
 | id | INTEGER · PK | 流水 ID |
 | user_id | INTEGER · FK(user) | 用户 |
-| type | TEXT | recharge / consume / refund / other |
+| type | TEXT | recharge / consume / refund / other / penalty / occupy_fee |
 | amount | REAL | 变动（正入负出，元） |
 | balance_after | REAL | 变动后余额 |
 | order_id | INTEGER · FK(charging_order) | 关联订单（可空） |
@@ -495,10 +507,12 @@ user_coupon
 | 商户合作类型 | franchise / partner / third_party | merchant.cooperation_type |
 | 站点设施 | washroom / convenience_store / rest_area / wifi / rain_shelter / underground_parking | station.facilities |
 | 天气状况 | sunny / cloudy / rain / hot / extreme | weather.condition |
-| 钱包流水类型 | recharge / consume / refund / other | wallet_transaction.type |
+| 钱包流水类型 | recharge / consume / refund / other / penalty / occupy_fee | wallet_transaction.type |
 | 通知类型 | reservation / order / point / coupon / work_order / system | notification.type |
 | 时间轴节点 | reserved / arrived / started / soc_50 / target_reached / finished / settled | order_timeline.node |
 | 积分原因 | charge / redeem | point_record.reason |
+| 预约类型 | immediate_queue / timed | reservation.reserve_type |
+| 订单/预约取消原因 | user_cancel / no_show / timeout / admin | charging_order.cancel_reason、reservation.cancel_reason |
 | 规则对象 | station / charger / user | rule_config.object_type |
 | 规则动作 | redirect / issue_coupon / create_alarm / create_work_order / limit_reservation | rule_config.action |
 | 订阅状态 | active / expired / cancelled | user_plan.status |
