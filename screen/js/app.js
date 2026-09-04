@@ -48,15 +48,13 @@
       live: "实时连接",
       connecting: "正在连接",
       reconnecting: "重新连接中",
-      offline: "未连接"
+      offline: "未连接",
+      stale: "数据已过期"
     };
-    element.textContent = labels[state.connection] ?? "连接异常";
-    element.className = `connection connection-${state.connection === "live" ? "live" : state.connection === "connecting" || state.connection === "reconnecting" ? "connecting" : "offline"}`;
+    const effectiveConnection = state.stale && state.connection === "live" ? "stale" : state.connection;
+    element.textContent = labels[effectiveConnection] ?? "连接异常";
+    element.className = `connection connection-${effectiveConnection === "live" ? "live" : effectiveConnection === "connecting" || effectiveConnection === "reconnecting" ? "connecting" : "offline"}`;
 
-    const modeBadge = $("mode-badge");
-    const liveMode = window.ScreenConfig.mode === "live";
-    modeBadge.textContent = liveMode ? "真实数据" : "演示数据";
-    modeBadge.className = `badge ${liveMode ? "badge-live" : "badge-demo"}`;
   }
 
   function renderMetrics(metrics) {
@@ -156,7 +154,7 @@
     renderAlarms(state.data.alarms);
     renderEvents(state.data.events);
     renderError(state.error);
-    setText("last-updated", state.lastUpdated ? `最近更新 ${formatClock(state.lastUpdated)}` : "尚未更新");
+    setText("last-updated", state.lastUpdated ? `${state.stale ? "数据已过期 · " : "最近更新 "}${formatClock(state.lastUpdated)}` : "尚未更新");
     window.ScreenCharts.render(state.data);
   }
 
@@ -190,6 +188,12 @@
     window.setInterval(() => setText("clock", formatClock(new Date())), 1000);
     setText("clock", formatClock(new Date()));
     window.ScreenStore.subscribe(render);
+    window.setInterval(() => {
+      const state = window.ScreenStore.getState();
+      if (window.ScreenConfig.mode === "live" && state.lastUpdated) {
+        window.ScreenStore.setStale(Date.now() - state.lastUpdated.getTime() > window.ScreenConfig.staleAfterMs);
+      }
+    }, 5000);
 
     if (window.ScreenConfig.mode === "live") {
       const client = new window.DashboardSocket(window.ScreenConfig, window.ScreenStore);

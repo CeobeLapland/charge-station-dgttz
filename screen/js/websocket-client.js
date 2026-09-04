@@ -11,6 +11,9 @@
       this.reconnectTimer = null;
       this.heartbeatTimer = null;
       this.missedHeartbeats = 0;
+      this.pendingSnapshotSeq = null;
+      this.lastSnapshotRequestAt = 0;
+      this.snapshotRefreshTimer = null;
       this.stopped = false;
     }
 
@@ -45,7 +48,19 @@
             this.missedHeartbeats = 0;
             return;
           }
+          if (message.type === "screen.snapshot_resp") {
+            if (!Number.isInteger(message.seq) || message.seq !== this.pendingSnapshotSeq) {
+              throw new Error("快照响应序号与请求不匹配");
+            }
+            if (!Number.isInteger(message.code) || !message.payload || typeof message.payload !== "object") {
+              throw new Error("快照响应信封不完整");
+            }
+            this.pendingSnapshotSeq = null;
+          }
           this.store.applyMessage(message);
+          if (message.type === "push.charger_status" && !message.payload?.metrics) {
+            this.requestSnapshotThrottled();
+          }
         } catch (error) {
           this.store.setError(`无法处理服务端消息：${error.message}`);
         }
@@ -66,28 +81,42 @@
 
     send(type, payload = {}) {
       if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
-        return false;
+        return null;
       }
 
       this.sequence += 1;
       this.socket.send(JSON.stringify({ type, seq: this.sequence, payload }));
-      return true;
+      return this.sequence;
     }
 
     requestSnapshot() {
-      this.send("screen.snapshot", {});
+      const seq = this.send("screen.snapshot", {});
+      if (seq !== null) {
+        this.pendingSnapshotSeq = seq;
+        this.lastSnapshotRequestAt = Date.now();
+      }
+    }
+
+    requestSnapshotThrottled() {
+      const wait = Math.max(0, this.config.snapshotRefreshThrottleMs - (Date.now() - this.lastSnapshotRequestAt));
+      if (this.snapshotRefreshTimer) return;
+      this.snapshotRefreshTimer = window.setTimeout(() => {
+        this.snapshotRefreshTimer = null;
+        this.requestSnapshot();
+      }, wait);
     }
 
     startHeartbeat() {
       this.stopHeartbeat();
       this.heartbeatTimer = window.setInterval(() => {
-        this.missedHeartbeats += 1;
         if (this.missedHeartbeats >= this.config.heartbeatFailureLimit) {
           this.store.setError("服务端心跳超时，准备重新连接");
           this.socket?.close();
           return;
         }
-        this.send("system.ping", { timestamp: new Date().toISOString() });
+        if (this.send("system.ping", { timestamp: new Date().toISOString() }) !== null) {
+          this.missedHeartbeats += 1;
+        }
       }, this.config.heartbeatIntervalMs);
     }
 
@@ -118,6 +147,9 @@
       this.stopHeartbeat();
       if (this.reconnectTimer) {
         window.clearTimeout(this.reconnectTimer);
+      }
+      if (this.snapshotRefreshTimer) {
+        window.clearTimeout(this.snapshotRefreshTimer);
       }
       this.socket?.close();
       this.socket = null;
