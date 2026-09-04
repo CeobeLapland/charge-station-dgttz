@@ -85,6 +85,7 @@ erDiagram
 | points | INTEGER | 累计可用积分 |
 | level | TEXT | 会员等级：normal / vip / enterprise |
 | status | TEXT | 状态：normal / frozen |
+| credit_score | INTEGER | 信用分（默认 100，违约负向扣减；低于阈值限制预约） |
 | register_time | TEXT | 注册时间（首次登录自动创建） |
 | last_login_time | TEXT | 最近登录时间（可空） |
 
@@ -166,6 +167,12 @@ erDiagram
 | points_earned | INTEGER | 本单获得积分 |
 | create_time | TEXT | 订单创建时间 |
 | settle_time | TEXT | 结算时间（可空） |
+| reserved_time | TEXT | 预约生效/期望开始时间（立即预约为匹配时刻，定时预约为期望开始时刻） |
+| scan_deadline | TEXT | 扫码启动截止时间（匹配后 + 保留窗口，超时未扫码转 cancelled） |
+| cancel_reason | TEXT | 取消原因：user_cancel / no_show / timeout / admin（可空） |
+| occupy_fee | REAL | 占位费（元，充满后未挪车按停车费累计，默认 0） |
+| occupy_min | INTEGER | 占位时长（分钟，默认 0） |
+| penalty_fee | REAL | 违约金（元，违约场景扣款，默认 0） |
 
 ### reservation（预约/排队）
 
@@ -182,6 +189,11 @@ erDiagram
 | estimate_start_time | TEXT | 预计开始充电时间 |
 | notified | INTEGER | 是否已推送"轮到你"通知（0/1，幂等防重复推送） |
 | status | TEXT | waiting / matched / cancelled |
+| reserve_type | TEXT | 预约类型：immediate_queue（即时排队）/ timed（定时预约） |
+| expect_time | TEXT | 期望开始时间（定时预约时刻 / 排队预测开始） |
+| matched_time | TEXT | 匹配到空闲桩的时间（可空，matched 后回填） |
+| expire_time | TEXT | 响应截止时间（matched 后 + 轮候窗口，超时顺延） |
+| cancel_reason | TEXT | 取消原因：user_cancel / timeout / no_show（可空） |
 
 ### price_rule（分时电价）
 
@@ -352,7 +364,7 @@ erDiagram
 | ---- | ---- | ---- |
 | id | INTEGER | 主键，自增 |
 | user_id | INTEGER | 外键，用户 |
-| type | TEXT | recharge / consume / refund / other |
+| type | TEXT | recharge / consume / refund / other / penalty / occupy_fee |
 | amount | REAL | 变动金额（元，正为入账，负为支出） |
 | balance_after | REAL | 变动后余额 |
 | order_id | INTEGER | 关联订单（可空，FK charging_order.id，消费/退款时回填） |
@@ -581,10 +593,12 @@ erDiagram
 | 商户合作类型 | franchise / partner / third_party |
 | 站点设施 | washroom / convenience_store / rest_area / wifi / rain_shelter / underground_parking |
 | 天气状况 | sunny / cloudy / rain / hot / extreme |
-| 钱包流水类型 | recharge / consume / refund / other |
+| 钱包流水类型 | recharge / consume / refund / other / penalty / occupy_fee |
 | 通知类型 | reservation / order / point / coupon / work_order / system |
 | 时间轴节点 | reserved / arrived / started / soc_50 / target_reached / finished / settled |
 | 积分原因 | charge / redeem |
+| 预约类型 | immediate_queue / timed |
+| 订单/预约取消原因 | user_cancel / no_show / timeout / admin |
 | 规则对象类型 | station / charger / user |
 | 规则动作 | redirect / issue_coupon / create_alarm / create_work_order / limit_reservation |
 | 套餐模板状态 | active / inactive |
