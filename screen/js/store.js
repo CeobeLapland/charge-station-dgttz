@@ -5,6 +5,7 @@
   let state = {
     data: window.ScreenAdapter.normalizeSnapshot({}),
     connection: "offline",
+    stale: false,
     lastUpdated: null,
     error: null
   };
@@ -19,6 +20,7 @@
     update({
       data: window.ScreenAdapter.normalizeSnapshot(payload),
       lastUpdated: new Date(),
+      stale: false,
       error: null
     });
   }
@@ -38,7 +40,14 @@
       const alarm = window.ScreenAdapter.normalizeAlarm(message.payload?.alarm ?? message.payload);
       const alarms = [alarm, ...data.alarms.filter((item) => item.id !== alarm.id)]
         .slice(0, window.ScreenConfig.maxAlarms);
-      update({ data: { ...data, alarms }, lastUpdated: new Date() });
+      const alarmEvent = window.ScreenAdapter.normalizeEvent({
+        id: `alarm-${alarm.id}`,
+        event_time: alarm.occur_time,
+        text: `${alarm.station_name}${alarm.charger_id == null ? "" : ` · 桩 ${alarm.charger_id}`}发生${alarm.type}告警`
+      });
+      const events = [alarmEvent, ...data.events.filter((item) => item.id !== alarmEvent.id)]
+        .slice(0, window.ScreenConfig.maxEvents);
+      update({ data: { ...data, alarms, events }, lastUpdated: new Date(), stale: false });
       return;
     }
 
@@ -46,7 +55,7 @@
       const event = window.ScreenAdapter.normalizeEvent(message.payload?.event ?? message.payload);
       const events = [event, ...data.events.filter((item) => item.id !== event.id)]
         .slice(0, window.ScreenConfig.maxEvents);
-      update({ data: { ...data, events }, lastUpdated: new Date() });
+      update({ data: { ...data, events }, lastUpdated: new Date(), stale: false });
       return;
     }
 
@@ -54,7 +63,7 @@
       const forecast = window.ScreenAdapter.normalizeForecastSeries(message.payload?.series);
       update({
         data: { ...data, load_series: { ...data.load_series, forecast } },
-        lastUpdated: new Date()
+        lastUpdated: new Date(), stale: false
       });
       return;
     }
@@ -70,8 +79,19 @@
               ...window.ScreenAdapter.normalizePartialMetrics(message.payload.metrics)
             }
           },
-          lastUpdated: new Date()
+          lastUpdated: new Date(), stale: false
         });
+      }
+      const chargerId = message.payload?.charger_id;
+      if (chargerId != null && message.payload?.status) {
+        const statusLabels = { idle: "空闲", charging: "充电中", reserved: "已预约", fault: "故障", offline: "离线", rebooting: "重启中" };
+        const event = window.ScreenAdapter.normalizeEvent({
+          id: `charger-${chargerId}-${message.payload.status}-${Date.now()}`,
+          event_time: new Date().toISOString(),
+          text: `电桩 ${chargerId} 状态更新为${statusLabels[message.payload.status] ?? "未知"}`
+        });
+        const events = [event, ...state.data.events].slice(0, window.ScreenConfig.maxEvents);
+        update({ data: { ...state.data, events }, lastUpdated: new Date(), stale: false });
       }
     }
   }
@@ -86,6 +106,10 @@
     setSnapshot,
     applyMessage,
     setConnection(connection) { update({ connection }); },
+    setStale(stale) {
+      const next = Boolean(stale);
+      if (state.stale !== next) update({ stale: next });
+    },
     setError(error) { update({ error: error ? String(error.message ?? error) : null }); }
   };
 }());
