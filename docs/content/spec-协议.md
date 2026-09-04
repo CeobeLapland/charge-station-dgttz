@@ -56,11 +56,11 @@
 | `station.detail_resp` | S→C | 电站 + 电桩数组 | station, chargers[] |
 | `station.recommend` | C→S | 智能推荐/一键找桩 | constraints{}（可空） |
 | `station.recommend_resp` | S→C | 推荐结果 | recommendation |
-| `reservation.join` | C→S | 加入智能排队 | user_id, station_id |
-| `reservation.join_resp` | S→C | 排队结果 | reservation, queue |
-| `reservation.cancel` | C→S | 取消预约 | reservation_id |
+| `reservation.join` | C→S | 加入智能排队/发起预约 | user_id, station_id, plan_time?（预约期望开始） |
+| `reservation.join_resp` | S→C | 排队/预约结果 | reservation, queue |
+| `reservation.cancel` | C→S | 取消预约/排队 | reservation_id |
 | `reservation.cancel_resp` | S→C | 取消结果 | — |
-| `order.create` | C→S | 预约/创建订单 | user_id, station_id, charger_id |
+| `order.create` | C→S | 预约/创建订单 | user_id, station_id, charger_id, reserved_time?（可空，定时预约期望开始时刻） |
 | `order.create_resp` | S→C | 创建结果 | order |
 | `order.start` | C→S | 开始充电 | order_id |
 | `order.start_resp` | S→C | 开始结果 | order |
@@ -119,6 +119,8 @@
 | `push.device_log` | S→管理端 | 运维动作结果 | device_log |
 | `push.order_event` | S→大屏 | 订单/充电事件流 | event（开始/完成/结算等） |
 | `push.reservation_notify` | S→用户端 | 排队轮到自己 | reservation_id, charger_id |
+| `push.reservation_timeout` | S→用户端 | 排队轮到/定时预约超时未响应，顺延 | reservation_id, next_expected |
+| `push.order_timeout` | S→用户端 | 预约扫码超时未启动，订单取消 | order_id, reason, penalty, credit_loss |
 
 ### 数据大屏（免登录只读）
 
