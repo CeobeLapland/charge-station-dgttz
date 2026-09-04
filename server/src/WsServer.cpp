@@ -1,5 +1,7 @@
 #include "WsServer.h"
 
+#include "ChargeSimulator.h"
+
 #include <QDateTime>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -101,6 +103,26 @@ WsServer::WsServer(quint16 port, QObject *parent)
             << QStringLiteral("[失败] 端口 %1 监听失败: %2 (是否已被其他进程占用?)")
                    .arg(port).arg(m_server.errorString());
     }
+
+    // ---- 启动充电仿真工作线程 ----
+    // m_sim 在主线程 new, 然后 moveToThread 交给工作线程; 之后它的槽函数
+    // 都在工作线程执行, 它发出的信号通过队列连接回到主线程的槽里。
+    m_sim = new ChargeSimulator;
+    m_sim->moveToThread(&m_simThread);
+    connect(&m_simThread, &QThread::started, m_sim, &ChargeSimulator::startTicking);
+    connect(&m_simThread, &QThread::finished, m_sim, &QObject::deleteLater);
+    connect(m_sim, &ChargeSimulator::progress,       this, &WsServer::onSimProgress);
+    connect(m_sim, &ChargeSimulator::measureTick,    this, &WsServer::onSimMeasure);
+    connect(m_sim, &ChargeSimulator::reachedTarget,  this, &WsServer::onSimReachedTarget);
+    m_simThread.start();
+}
+
+WsServer::~WsServer()
+{
+    // 干净地关掉工作线程: 让它的事件循环退出, 再等它真正结束。
+    // 不 wait 就析构 QThread 会直接 terminate, 可能在半路上被砍。
+    m_simThread.quit();
+    m_simThread.wait(3000);
 }
 
 bool WsServer::isListening() const { return m_server.isListening(); }
@@ -122,6 +144,19 @@ void WsServer::onDisconnected()
     m_clients.remove(sock);                     // 连接没了, 它的身份也一起清掉
     sock->deleteLater();
     qInfo().noquote() << QStringLiteral("[断开] 客户端离线 (当前在线 %1)").arg(m_clients.size());
+}
+
+// ---------- 定向推送: 只发给某个已登录用户的连接 ----------
+void WsServer::sendToUser(int userId, const QString &type, const QJsonObject &payload)
+{
+    if (userId <= 0) return;
+    const QJsonObject msg{{"type", type}, {"payload", payload}};
+    const QString text = QString::fromUtf8(QJsonDocument(msg).toJson(QJsonDocument::Compact));
+    int n = 0;
+    for (auto it = m_clients.cbegin(); it != m_clients.cend(); ++it) {
+        if (it.value().userId == userId) { it.key()->sendTextMessage(text); ++n; }
+    }
+    Q_UNUSED(n);   // 用户不在线是正常情况(比如关了 App), 不用报错
 }
 
 // ---------- 服务端主动推送: 群发给所有在线连接 ----------
@@ -726,6 +761,12 @@ QJsonObject WsServer::handleOrderStart(QWebSocket *sock, const QJsonObject &payl
     const auto o = dao::startOrder(userIdOf(sock), orderId, startSoc, &err);
     if (!o) { code = err.code; message = err.message; return {}; }
 
+    // ★ 交给仿真线程: 之后 SOC/电量/费用由工作线程每秒推进, 主线程只管推送和写库
+    const auto sp = dao::simParamsOf(o->id);
+    simAddOrder(o->id, o->userId, o->chargerId, o->stationId,
+                o->startSoc, o->targetSoc > 0 ? o->targetSoc : 100.0,
+                sp.powerKw, sp.batteryKwh, sp.unitPrice);
+
     broadcast(QStringLiteral("push.charger_status"),
               QJsonObject{{"charger_id", o->chargerId}, {"station_id", o->stationId},
                           {"status", "charging"}, {"soc", o->startSoc}});
@@ -743,13 +784,20 @@ QJsonObject WsServer::handleOrderFinish(QWebSocket *sock, const QJsonObject &pay
                                         int &code, QString &message)
 {
     if (!requireUser(sock, code, message)) return {};
-    const int    orderId = payload.value(QStringLiteral("order_id")).toInt();
-    const double endSoc  = payload.contains(QStringLiteral("end_soc"))
-                               ? payload.value(QStringLiteral("end_soc")).toDouble() : -1.0;
+    const int orderId = payload.value(QStringLiteral("order_id")).toInt();
+    // 优先用客户端给的 end_soc; 没给就用仿真器算到的当前电量;
+    // 都没有(比如服务端重启过)才退回按时长估算。
+    double endSoc = -1.0;
+    if (payload.contains(QStringLiteral("end_soc")))
+        endSoc = payload.value(QStringLiteral("end_soc")).toDouble();
+    else if (m_liveSoc.contains(orderId))
+        endSoc = m_liveSoc.value(orderId);
 
     OpError err;
     const auto o = dao::finishOrder(userIdOf(sock), orderId, endSoc, &err);
     if (!o) { code = err.code; message = err.message; return {}; }
+    simRemoveOrder(o->id);          // 用户手动结束: 停掉仿真
+    m_liveSoc.remove(o->id);
 
     broadcast(QStringLiteral("push.charger_status"),
               QJsonObject{{"charger_id", o->chargerId}, {"station_id", o->stationId},
@@ -794,6 +842,8 @@ QJsonObject WsServer::handleOrderCancel(QWebSocket *sock, const QJsonObject &pay
     OpError err;
     const auto o = dao::cancelOrder(userIdOf(sock), orderId, &err);
     if (!o) { code = err.code; message = err.message; return {}; }
+    simRemoveOrder(o->id);
+    m_liveSoc.remove(o->id);
 
     broadcast(QStringLiteral("push.charger_status"),
               QJsonObject{{"charger_id", o->chargerId}, {"station_id", o->stationId},
@@ -855,4 +905,94 @@ QJsonObject WsServer::handleUserRecharge(QWebSocket *sock, const QJsonObject &pa
         {"id", u->id}, {"phone", u->phone}, {"nickname", u->nickname},
         {"balance", u->balance}, {"points", u->points},
         {"level", u->level}, {"status", u->status}}}};
+}
+
+// ==================================================================
+//        充电仿真: 主线程这一侧(收工作线程的信号, 写库 + 推送)
+// ==================================================================
+
+// 跨线程投递: 用队列连接把调用排到工作线程的事件循环里执行。
+// 参数按值拷贝过去, 所以不需要加锁。
+void WsServer::simAddOrder(int orderId, int userId, int chargerId, int stationId,
+                           double startSoc, double targetSoc, double powerKw,
+                           double batteryKwh, double unitPrice)
+{
+    if (!m_sim) return;
+    QMetaObject::invokeMethod(m_sim, "addOrder", Qt::QueuedConnection,
+                              Q_ARG(int, orderId), Q_ARG(int, userId),
+                              Q_ARG(int, chargerId), Q_ARG(int, stationId),
+                              Q_ARG(double, startSoc), Q_ARG(double, targetSoc),
+                              Q_ARG(double, powerKw), Q_ARG(double, batteryKwh),
+                              Q_ARG(double, unitPrice));
+}
+
+void WsServer::simRemoveOrder(int orderId)
+{
+    if (!m_sim) return;
+    QMetaObject::invokeMethod(m_sim, "removeOrder", Qt::QueuedConnection, Q_ARG(int, orderId));
+}
+
+// ---------- 每秒一次: 推进度给这个用户, 顺便刷新电桩的实时电气参数 ----------
+void WsServer::onSimProgress(int orderId, int userId, int chargerId, int stationId,
+                             double soc, double powerKw, double energyKwh, double cost, int etaMin)
+{
+    // 电压/电流是按功率反推的模拟值, 让管理端的"数字孪生"面板有东西看
+    const double voltage = powerKw >= 30 ? 500.0 : 220.0;
+    const double current = voltage > 0 ? std::round(powerKw * 1000.0 / voltage * 10) / 10.0 : 0.0;
+    const double temp    = 25.0 + powerKw / 8.0 + soc / 20.0;    // 功率越大、电量越高越热
+
+    m_liveSoc.insert(orderId, soc);      // 记下最新电量, 手动结束时要用
+    dao::updateChargerElectrics(chargerId, voltage, current, std::round(temp * 10) / 10.0);
+
+    // push.order_progress 只跟这一个用户有关, 定向发, 不广播
+    sendToUser(userId, QStringLiteral("push.order_progress"), QJsonObject{
+        {"order_id", orderId}, {"charger_id", chargerId}, {"station_id", stationId},
+        {"soc", soc}, {"power_kw", powerKw}, {"energy", energyKwh},
+        {"cost", cost}, {"eta", etaMin},
+    });
+}
+
+// ---------- 每 15 个 tick: 落一条时序点 + 给各端广播电桩状态 ----------
+void WsServer::onSimMeasure(int chargerId, int stationId, double powerKw,
+                            double soc, double energyDelta)
+{
+    const double temp = std::round((25.0 + powerKw / 8.0 + soc / 20.0) * 10) / 10.0;
+    dao::insertMeasure(chargerId, stationId,
+                       QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss")),
+                       powerKw, soc, energyDelta, temp);
+
+    // 大屏/管理端关心的是"哪台桩现在什么状态", 频率低一些即可
+    broadcast(QStringLiteral("push.charger_status"), QJsonObject{
+        {"charger_id", chargerId}, {"station_id", stationId}, {"status", "charging"},
+        {"soc", soc}, {"power_kw", powerKw}, {"temperature", temp},
+    });
+}
+
+// ---------- 充到目标电量: 自动结束充电(数据库写入在主线程做) ----------
+void WsServer::onSimReachedTarget(int orderId, int userId, double endSoc)
+{
+    m_liveSoc.remove(orderId);
+    OpError err;
+    const auto o = dao::finishOrder(userId, orderId, endSoc, &err);
+    if (!o) {
+        qWarning().noquote() << QStringLiteral("[仿真] 订单 #%1 自动结束失败: %2")
+                                    .arg(orderId).arg(err.message);
+        return;
+    }
+    qInfo().noquote() << QStringLiteral("[仿真] 订单 #%1 自动结束: %2 kWh, %3 元, 待结算")
+                             .arg(orderId).arg(o->energyKwh).arg(o->amount);
+
+    // 告诉用户端: 充满了, 可以去结算
+    sendToUser(userId, QStringLiteral("push.order_progress"), QJsonObject{
+        {"order_id", orderId}, {"charger_id", o->chargerId}, {"station_id", o->stationId},
+        {"soc", o->endSoc}, {"power_kw", 0}, {"energy", o->energyKwh},
+        {"cost", o->amount}, {"eta", 0}, {"finished", true},
+    });
+    broadcast(QStringLiteral("push.charger_status"), QJsonObject{
+        {"charger_id", o->chargerId}, {"station_id", o->stationId},
+        {"status", "idle"}, {"soc", o->endSoc}});
+    broadcast(QStringLiteral("push.order_event"), QJsonObject{{"event", QJsonObject{
+        {"id", QStringLiteral("evt-o%1-target_reached").arg(orderId)},
+        {"event_time", o->endTime}, {"event_type", "target_reached"},
+        {"text", QStringLiteral("%1 %2 充电完成, 待结算").arg(o->stationName, o->chargerCode)}}}});
 }

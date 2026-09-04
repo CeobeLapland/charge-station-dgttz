@@ -1,10 +1,12 @@
 #pragma once
 #include <QHash>
+#include <QThread>
 #include <QJsonObject>
 #include <QObject>
 #include <QWebSocketServer>
 
 class QWebSocket;
+class ChargeSimulator;
 
 // ============================================================
 // WsServer — WebSocket 服务主循环("接线员")
@@ -29,13 +31,24 @@ class WsServer : public QObject
     Q_OBJECT
 public:
     explicit WsServer(quint16 port, QObject *parent = nullptr);
+    ~WsServer() override;
     bool isListening() const;
+
+    // 只推给某个已登录用户的连接(可能有多条)。push.order_progress 这类
+    // "只跟一个人有关"的消息走这里, 不广播给所有端。
+    void sendToUser(int userId, const QString &type, const QJsonObject &payload);
 
     // 向所有在线连接推送一条消息(无 seq)。所有 push.* 都走这里。
     // 例: broadcast("push.charger_status", {{"charger_id",7},{"status","charging"}});
     void broadcast(const QString &type, const QJsonObject &payload);
 
 private slots:
+    // ---- 来自充电仿真工作线程的信号(队列连接, 在主线程执行) ----
+    void onSimProgress(int orderId, int userId, int chargerId, int stationId,
+                       double soc, double powerKw, double energyKwh, double cost, int etaMin);
+    void onSimMeasure(int chargerId, int stationId, double powerKw, double soc, double energyDelta);
+    void onSimReachedTarget(int orderId, int userId, double endSoc);
+
     void onNewConnection();                       // 有新客户端连上来
     void onTextMessage(const QString &message);   // 收到一条文本消息
     void onDisconnected();                        // 客户端断开
@@ -103,6 +116,21 @@ private:
     QJsonObject handleScreenSnapshot(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
     QJsonObject handleMlForecast(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
 
+    // 把一笔订单交给仿真线程 / 从仿真线程撤下(跨线程调用, 队列投递)
+    void simAddOrder(int orderId, int userId, int chargerId, int stationId,
+                     double startSoc, double targetSoc, double powerKw,
+                     double batteryKwh, double unitPrice);
+    void simRemoveOrder(int orderId);
+
     QWebSocketServer m_server;
     QHash<QWebSocket *, Session> m_clients;   // 在线连接 → 该连接的身份
+
+    // 仿真器报上来的最新进度(orderId → SOC)。
+    // 用户手动点"结束充电"时如果没带 end_soc, 就用这里的值 ——
+    // 否则会按"真实经过了几秒"去算电量, 金额会严重偏低。
+    QHash<int, double> m_liveSoc;
+
+    // ---- 充电仿真: 工作线程 + 仿真器对象 ----
+    QThread          m_simThread;
+    ChargeSimulator *m_sim = nullptr;
 };
