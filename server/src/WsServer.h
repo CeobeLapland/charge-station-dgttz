@@ -18,8 +18,8 @@ class QWebSocket;
 // 错误码分段(新增错误码请按此分段, 并同步 spec-协议.md):
 //   0     成功
 //   1xxx  用户相关    1004未登录 1002手机号格式错误 1003用户被冻结
-//   2xxx  订单/充电相关
-//   3xxx  电站/电桩相关
+//   2xxx  订单/充电   2001有未完成订单 2002余额不足 2003状态不允许该操作
+//   3xxx  电站/电桩   3002电桩非空闲
 //   4xxx  数据不存在  4001数据不存在
 //   5xxx  模型层      5001预测/模型不可用
 //   9xxx  协议层      9001消息格式错误 9002未知消息类型
@@ -58,6 +58,8 @@ private:
 
     // admin.* 的统一准入: 未登录时回填 1004 并返回 false。
     bool requireAdmin(QWebSocket *sock, int &code, QString &message) const;
+    // user.*/order.* 的统一准入: 未登录时回填 1004 并返回 false。
+    bool requireUser(QWebSocket *sock, int &code, QString &message) const;
 
     // 分发中心: 按 type 调用对应处理函数。
     // 返回响应的 payload; code/message 通过引用参数回填。
@@ -69,6 +71,7 @@ private:
     QJsonObject handlePing(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
     QJsonObject handleUserLogin(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
     QJsonObject handleUserInfo(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+    QJsonObject handleUserRecharge(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
     QJsonObject handleStationNearby(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
     QJsonObject handleStationDetail(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
 
@@ -86,6 +89,15 @@ private:
     QJsonObject handleAdminUserToggleStatus(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
     QJsonObject handleAdminDeviceLog(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
     QJsonObject handleAdminFaultRisk(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+
+    // ---- 订单 order.* ----
+    QJsonObject handleOrderCreate(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+    QJsonObject handleOrderStart(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+    QJsonObject handleOrderFinish(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+    QJsonObject handleOrderSettle(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+    QJsonObject handleOrderCancel(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+    QJsonObject handleOrderList(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+    QJsonObject handleOrderDetail(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
 
     // ---- 数据大屏 screen.* / ml.* ----
     QJsonObject handleScreenSnapshot(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);

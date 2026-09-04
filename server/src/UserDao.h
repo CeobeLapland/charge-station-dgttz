@@ -34,4 +34,10 @@ std::optional<User> findUserById(int id);
 // 对应协议消息 user.login (见 docs/content/spec-协议.md)。
 std::optional<User> loginOrRegister(const QString &phone, bool *created = nullptr);
 
+// 余额充值(模拟支付)。amount 必须 > 0。
+// 事务内同时: 加余额 + 记一条 wallet_transaction 流水 —— 余额是"现在多少钱",
+// 流水是"怎么变成这样的", 两者必须一起写。
+// 成功返回充值后的用户; 金额非法或用户不存在返回 nullopt。
+std::optional<User> recharge(int userId, double amount);
+
 }  // namespace dao
