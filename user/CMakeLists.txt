@@ -34,6 +34,8 @@ qt_add_executable(charge_user_client
     src/UserData.cpp
     src/ChatData.h
     src/ChatData.cpp
+    src/ChargingFlow.h
+    src/ChargingFlow.cpp
     qml/Main.qml
     qml/pages/LoginPage.qml
     qml/pages/RegisterPage.qml
@@ -60,6 +62,10 @@ qt_add_executable(charge_user_client
     qml/pages/UserPortraitPage.qml
     qml/pages/ScanPage.qml
     qml/pages/NavRoutePage.qml
+    qml/pages/ReservePage.qml
+    qml/pages/QueuePage.qml
+    qml/pages/ChargingPage.qml
+    qml/pages/SettlePage.qml
     qml/components/BottomNav.qml
     qml/components/ConfirmDialog.qml
     qml/map/explore_map.qrc
@@ -96,6 +102,10 @@ qt_add_qml_module(charge_user_client
         qml/pages/UserPortraitPage.qml
         qml/pages/ScanPage.qml
         qml/pages/NavRoutePage.qml
+        qml/pages/ReservePage.qml
+        qml/pages/QueuePage.qml
+        qml/pages/ChargingPage.qml
+        qml/pages/SettlePage.qml
         qml/components/BottomNav.qml
         qml/components/ConfirmDialog.qml
     RESOURCES

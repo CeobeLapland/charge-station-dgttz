@@ -320,7 +320,7 @@ Item {
                     currentIndex: root.ownerIdx
                     background: Rectangle { color: Theme.background; border.color: Theme.border; radius: Theme.radiusSmall }
                     contentItem: Text {
-                        text: control.displayText; color: Theme.textPrimary
+                        text: parent.displayText; color: Theme.textPrimary
                         font.pixelSize: Theme.fontSizeSmall
                         leftPadding: 10; verticalAlignment: Text.AlignVCenter
                     }
@@ -335,7 +335,7 @@ Item {
                     currentIndex: root.ratingIdx
                     background: Rectangle { color: Theme.background; border.color: Theme.border; radius: Theme.radiusSmall }
                     contentItem: Text {
-                        text: control.displayText; color: Theme.textPrimary
+                        text: parent.displayText; color: Theme.textPrimary
                         font.pixelSize: Theme.fontSizeSmall
                         leftPadding: 10; verticalAlignment: Text.AlignVCenter
                     }

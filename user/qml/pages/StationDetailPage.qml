@@ -335,11 +335,11 @@ Item {
                 Text { anchors.centerIn: parent; text: qsTr("一键导航"); color: Theme.primary; font.bold: true; font.pixelSize: Theme.fontSizeBase }
                 MouseArea { anchors.fill: parent; onClicked: showToast(qsTr("导航（示例）：腾讯地图路线规划待接入")) }
             }
-            // 立即充电
+            // 立即预约（充电全流程统一入口）
             Rectangle {
                 width: 170; height: 48; radius: Theme.radiusSmall; color: Theme.primary
-                Text { anchors.centerIn: parent; text: qsTr("立即充电"); color: "#ffffff"; font.bold: true; font.pixelSize: Theme.fontSizeBase }
-                MouseArea { anchors.fill: parent; onClicked: startCharge() }
+                Text { anchors.centerIn: parent; text: qsTr("立即预约"); color: "#ffffff"; font.bold: true; font.pixelSize: Theme.fontSizeBase }
+                MouseArea { anchors.fill: parent; onClicked: startReserve() }
             }
         }
     }
@@ -363,13 +363,10 @@ Item {
     Timer { id: toastTimer; interval: 2000; onTriggered: toast.visible = false }
     function showToast(msg) { toastText.text = msg; toast.visible = true; toastTimer.restart() }
 
-    // 启动充电：示例阶段由空闲桩触发提示（充电过程模拟后续接入）
-    function startCharge() {
-        var idleCount = Number(st.fast_idle) + Number(st.slow_idle)
-        if (idleCount <= 0)
-            showToast(qsTr("该站暂无空闲桩，可前往详情查看排队"))
-        else
-            showToast(qsTr("已选择空闲桩，充电流程（示例）待接入"))
+    // 发起预约：跳转预约表单（充电全流程统一入口，有空位/排队由服务端决策）
+    function startReserve() {
+        stackView.push("qrc:/UserClient/qml/pages/ReservePage.qml",
+                       { stationId: root.stationId })
     }
 
     function levelText(lv) {
