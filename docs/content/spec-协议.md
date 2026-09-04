@@ -38,39 +38,6 @@
 
 ## 消息类型字典
 
-### 数据大屏（免登录只读）
-
-| type | 方向 | 说明 | payload 要点 |
-| ---- | ---- | ---- | ------------ |
-| `screen.snapshot` | C→S | 大屏全量初始数据（首连/重连时请求） | 可选 hours(默认24)、days(默认7) |
-| `screen.snapshot_resp` | S→C | 全量快照 | metrics, stations[], load_series, utilization_rank[], alarms[], user_growth[], energy_by_price_level, events[] |
-| `ml.forecast` | C→S | 主动查询负荷预测 | station_id, horizon |
-| `ml.forecast_resp` | S→C | **当前返回 5001（模型未接入）** | — |
-
-`screen.snapshot_resp.payload` 结构见 `screen/API_CONTRACT.md` 第 4 节，服务端已按该结构实现。
-
-## 统计口径（服务端唯一定义，管理端与大屏必须一致）
-
-| 指标 | 口径 |
-| ---- | ---- |
-| `today_*` | 今天 00:00:00 至此刻（本地时间） |
-| `today_orders` | 今日**创建**的订单数，按 `charging_order.create_time`，不论最终状态 |
-| `today_revenue` | 今日已结算订单（`status='completed'`）的 `pay_amount` 合计 |
-| `online_rate` | 在线桩 / 总桩 × 100，**返回 0–100**；在线 = `status NOT IN ('offline','fault')` |
-| `load_rate`（站点） | 该站 `charging` 桩数 / 该站总桩数 × 100 |
-| `utilization_rate`（站点） | 该站今日订单 `duration_min` 合计 / (该站桩数 × 今日已过分钟数) × 100，上限 100 |
-| `*_change_pct` | (今日值 − 昨日同期值) / 昨日同期值 × 100；昨日同期为 0 时返回 0。**"同期"= 昨天 00:00 到昨天的此刻**，不拿半天比一整天 |
-| `energy_by_price_level` | **近 7 日**已结算订单按 `price_level` 聚合（不是今日：今日峰时段可能还没到，只统计今日会让 peak 恒为 0） |
-| 时间格式 | 一律本地时间 `yyyy-MM-dd HH:mm:ss`，不使用 UTC / ISO 8601 |
-
-## 心跳的例外
-
-响应类型的通用规则是「请求 type + `_resp`」，**唯一例外是心跳**：`system.ping` 的响应 type 是 `system.pong`（不是 `system.ping_resp`），但仍然带 `seq` / `code` / `message`，与其他响应一致。
-
-## 事件流与脱敏
-
-`events[]` 与 `push.order_event` 中的 `text` 由服务端生成，手机号已打码为 `138****0001`。**服务端不会发出完整手机号**，各端直接显示即可，不需要自行脱敏。事件 `id` 形如 `evt-o<订单id>-<事件类型>`，稳定唯一，可用于去重。
-
 ### 用户端
 
 | type | 方向 | 说明 | payload 要点 |
@@ -153,6 +120,17 @@
 | `push.order_event` | S→大屏 | 订单/充电事件流 | event（开始/完成/结算等） |
 | `push.reservation_notify` | S→用户端 | 排队轮到自己 | reservation_id, charger_id |
 
+### 数据大屏（免登录只读）
+
+| type | 方向 | 说明 | payload 要点 |
+| ---- | ---- | ---- | ------------ |
+| `screen.snapshot` | C→S | 大屏全量初始数据（首连/重连时请求） | 可选 hours(默认24)、days(默认7) |
+| `screen.snapshot_resp` | S→C | 全量快照 | metrics, stations[], load_series, utilization_rank[], alarms[], user_growth[], energy_by_price_level, events[] |
+| `ml.forecast` | C→S | 主动查询负荷预测 | station_id, horizon |
+| `ml.forecast_resp` | S→C | **当前返回 5001（模型未接入）** | — |
+
+`screen.snapshot_resp.payload` 结构见 `screen/API_CONTRACT.md` 第 4 节，服务端已按该结构实现。
+
 ### 系统与机器学习
 
 | type | 方向 | 说明 | payload 要点 |
@@ -161,8 +139,6 @@
 | `ml.forecast` | 各端→S | 负荷预测查询 | station_id?, horizon |
 | `ml.forecast_resp` | S→C | 预测序列 | forecast[]（实际+预测） |
 | `push.forecast` | S→大屏/用户端 | 预测更新推送 | station_id, horizon, series |
-| `screen.snapshot` | 大屏→S | 拉取全量快照 | — |
-| `screen.snapshot_resp` | S→C | 驾驶舱全量数据 | 见 spec-大屏 |
 
 ### 增强消息（可选实现）
 
@@ -224,6 +200,74 @@
 | `push.review` | S→大屏/管理端 | 新评价实时推送 | review |
 
 > 注：`order.settle` 可携带 `coupon_id` 完成券核销抵扣；抵扣时订单实付金额 = 应收 − 券面额。
+
+## 统计口径（服务端唯一定义，管理端与大屏必须一致）
+
+| 指标 | 口径 |
+| ---- | ---- |
+| `today_*` | 今天 00:00:00 至此刻（本地时间） |
+| `today_orders` | 今日**创建**的订单数，按 `charging_order.create_time`，不论最终状态 |
+| `today_revenue` | 今日已结算订单（`status='completed'`）的 `pay_amount` 合计 |
+| `online_rate` | 在线桩 / 总桩 × 100，**返回 0–100**；在线 = `status NOT IN ('offline','fault')` |
+| `load_rate`（站点） | 该站 `charging` 桩数 / 该站总桩数 × 100 |
+| `utilization_rate`（站点） | 该站今日订单 `duration_min` 合计 / (该站桩数 × 今日已过分钟数) × 100，上限 100 |
+| `*_change_pct` | (今日值 − 昨日同期值) / 昨日同期值 × 100；昨日同期为 0 时返回 0。**"同期"= 昨天 00:00 到昨天的此刻**，不拿半天比一整天 |
+| `energy_by_price_level` | **近 7 日**已结算订单按 `price_level` 聚合（不是今日：今日峰时段可能还没到，只统计今日会让 peak 恒为 0） |
+| 时间格式 | 一律本地时间 `yyyy-MM-dd HH:mm:ss`，不使用 UTC / ISO 8601 |
+
+## 心跳的例外
+
+响应类型的通用规则是「请求 type + `_resp`」，**唯一例外是心跳**：`system.ping` 的响应 type 是 `system.pong`（不是 `system.ping_resp`），但仍然带 `seq` / `code` / `message`，与其他响应一致。
+
+## 事件流与脱敏
+
+`events[]` 与 `push.order_event` 中的 `text` 由服务端生成，手机号已打码为 `138****0001`。**服务端不会发出完整手机号**，各端直接显示即可，不需要自行脱敏。事件 `id` 形如 `evt-o<订单id>-<事件类型>`，稳定唯一，可用于去重。
+
+## 订单流程补充说明（服务端已实现）
+
+### 状态机
+
+```
+reserved ──order.start──> charging ──order.finish──> pending_settle ──order.settle──> completed
+   │
+   └──order.cancel──> cancelled
+```
+
+每一步都校验当前状态，状态不匹配一律返回 `2003`。
+
+### 身份一律取自连接，payload 不再传 user_id
+
+`order.create` / `order.list` 等消息**不需要也不应该传 `user_id`**。服务端从这条 WebSocket 连接上取当前登录用户（`user.login` 时绑定），客户端上报的 `user_id` 一概忽略。传了别人的 id 也没用，改不了结果。
+
+同理，所有订单操作都会校验归属：**不是自己的订单一律按"不存在"处理（4001）**，不区分"不存在"和"不是你的"，避免泄露别人的订单 id 是否存在。
+
+### 消息与 payload
+
+| type | payload | 说明 |
+| ---- | ---- | ---- |
+| `order.create` | `charger_id`（必填），`station_id`（可选，仅做一致性校验） | 成功后电桩置 `reserved` |
+| `order.start` | `order_id`，`start_soc`（可选，默认 20） | 电桩置 `charging` |
+| `order.finish` | `order_id`，`end_soc`（可选） | 转 `pending_settle`，电桩回 `idle` |
+| `order.settle` | `order_id`，`points_used`（可选，默认 0） | 响应含 `order` / `points` / `balance` / `total_points` |
+| `order.cancel` | `order_id` | 仅 `reserved` 可取消，电桩释放 |
+| `order.list` | `status`（可选） | 我的订单，倒序 |
+| `order.detail` | `order_id` | 含 `timeline[]` |
+| `user.recharge` | `amount` | 模拟支付，响应含 `balance` |
+
+### 计费与积分规则
+
+| 项 | 规则 |
+| ---- | ---- |
+| 电量 | 传了 `end_soc` → `(end_soc − start_soc) / 100 × 车辆 battery_kwh`；没传 → `功率 × 时长 × 0.92`（充电效率） |
+| 金额 | `电量 × (分时电价 + 该站 service_fee)` |
+| 分时档位 | 按**开始充电时刻**判定：0–8 谷 / 17–21 峰 / 其余平 |
+| 积分抵扣 | 100 积分 = 1 元；不超过自己的积分，也不超过订单金额 |
+| 积分获得 | 实付金额向下取整，1 元 = 1 积分 |
+| 起充门槛 | 余额 < 10 元不允许 `order.start`（返回 2002） |
+
+### 结算写入的五张表（同一个事务）
+
+`charging_order`（转 completed）、`user`（扣余额、积分净变化）、`wallet_transaction`（消费流水）、`point_record`（获得/抵扣各一条）、`order_timeline`（settled 节点）。任何一步失败整体回滚。
 
 ## 错误码
 
