@@ -12,6 +12,7 @@
     heartbeatFailureLimit: 3,
     reconnectBaseDelayMs: 1000,
     reconnectMaxDelayMs: 15000,
+    snapshotRefreshThrottleMs: 2000,
     staleAfterMs: 60000,
     maxAlarms: 20,
     maxEvents: 30,
