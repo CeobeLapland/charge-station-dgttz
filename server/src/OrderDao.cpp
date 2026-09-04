@@ -125,6 +125,52 @@ double scalarOf(const QString &sql, const QVariantList &binds)
 
 namespace dao {
 
+void updateChargerElectrics(int chargerId, double voltage, double current, double temperature)
+{
+    QSqlQuery q;
+    q.prepare(QStringLiteral(
+        "UPDATE charger SET voltage=?, current=?, temperature=? WHERE id=?"));
+    q.addBindValue(voltage);
+    q.addBindValue(current);
+    q.addBindValue(temperature);
+    q.addBindValue(chargerId);
+    q.exec();
+}
+
+void insertMeasure(int chargerId, int stationId, const QString &time,
+                   double powerKw, double soc, double energyDelta, double temperature)
+{
+    QSqlQuery q;
+    q.prepare(QStringLiteral(
+        "INSERT INTO charging_measure(charger_id, station_id, measure_time, power_kw, soc, "
+        "  energy_delta_kwh, temperature) VALUES(?,?,?,?,?,?,?)"));
+    q.addBindValue(chargerId);
+    q.addBindValue(stationId);
+    q.addBindValue(time);
+    q.addBindValue(powerKw);
+    q.addBindValue(soc);
+    q.addBindValue(energyDelta);
+    q.addBindValue(temperature);
+    q.exec();
+}
+
+SimParams simParamsOf(int orderId)
+{
+    SimParams p;
+    const auto o = fetchOrder(orderId);
+    if (!o) return p;
+    p.powerKw    = scalarOf(QStringLiteral("SELECT power FROM charger WHERE id=?"), {o->chargerId});
+    p.batteryKwh = (o->vehicleId > 0)
+        ? scalarOf(QStringLiteral("SELECT battery_kwh FROM vehicle WHERE id=?"), {o->vehicleId})
+        : 60.0;
+    if (p.batteryKwh <= 0) p.batteryKwh = 60.0;
+    const double svcFee = scalarOf(QStringLiteral("SELECT service_fee FROM station WHERE id=?"),
+                                   {o->stationId});
+    p.unitPrice = dao::currentPrice(o->stationId) + svcFee;
+    p.ok = true;
+    return p;
+}
+
 double userBalance(int userId)
 {
     return scalarOf(QStringLiteral("SELECT balance FROM user WHERE id = ?"), {userId});

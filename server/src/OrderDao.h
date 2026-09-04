@@ -79,6 +79,20 @@ std::optional<OrderView> findOrder(int userId, int orderId);
 // 订单时间轴。
 QList<TimelineRow> timelineOf(int orderId);
 
+// 仿真器需要的参数: 桩功率、车辆电池容量、当前单价(分时电价 + 服务费)。
+struct SimParams {
+    double powerKw = 0, batteryKwh = 60, unitPrice = 0;
+    bool   ok = false;
+};
+SimParams simParamsOf(int orderId);
+
+// ---- 充电仿真写入(由主线程调用, SQL 仍然只在 DAO 层) ----
+// 刷新电桩的实时电气参数(管理端数字孪生面板用)。
+void updateChargerElectrics(int chargerId, double voltage, double current, double temperature);
+// 往 charging_measure 落一条时序点(大屏负荷曲线用)。
+void insertMeasure(int chargerId, int stationId, const QString &time,
+                   double powerKw, double soc, double energyDelta, double temperature);
+
 // 当前余额/积分(结算后回给客户端刷新用)。
 double userBalance(int userId);
 int    userPoints(int userId);
