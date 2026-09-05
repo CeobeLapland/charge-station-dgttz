@@ -1,4 +1,5 @@
 #pragma once
+#include <QList>
 #include <QWidget>
 #include <QJsonObject>
 
@@ -13,6 +14,7 @@
 class QComboBox;
 class QGroupBox;
 class QLabel;
+class QEvent;
 class ApiClient;
 
 class SalesPage : public QWidget {
@@ -20,11 +22,16 @@ class SalesPage : public QWidget {
 public:
     explicit SalesPage(ApiClient* api, QWidget* parent = nullptr);
 
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override;
+
 private slots:
     void refresh(int days);
 
 private:
     void updateMetrics(const QJsonObject& payload, int days, double rangeSum);
+    void showTipText(const QString& text);
+    void hideTip();
 
     ApiClient* m_api = nullptr;
     QComboBox* m_rangeCombo = nullptr;
@@ -34,20 +41,30 @@ private:
     QLabel* m_monthLabel = nullptr;
     QLabel* m_totalLabel = nullptr;
 
-    // 折线：营收趋势（X 轴为日期）
     QChartView* m_lineChartView = nullptr;
     QLineSeries* m_lineSeries = nullptr;
     QScatterSeries* m_scatterSeries = nullptr;
     QBarCategoryAxis* m_lineAxisX = nullptr;
     QValueAxis* m_lineAxisY = nullptr;
-    // 柱状（合并）：每日充电量 + 每日订单量（双 Y 轴）
+
     QChartView* m_barView = nullptr;
     QBarSeries* m_energySeries = nullptr;
     QBarSeries* m_ordersSeries = nullptr;
+    QBarSet* m_energySet = nullptr;
+    QBarSet* m_ordersSet = nullptr;
     QBarCategoryAxis* m_barAxisX = nullptr;
-    QValueAxis* m_energyAxisY = nullptr;   // 左轴：kWh
-    QValueAxis* m_ordersAxisY = nullptr;   // 右轴：单
-    // 饼图：站点营收占比
+    QValueAxis* m_energyAxisY = nullptr;
+    QValueAxis* m_ordersAxisY = nullptr;
+
     QChartView* m_pieView = nullptr;
     QPieSeries* m_pieSeries = nullptr;
+
+    QLabel* m_tip = nullptr;      // 自绘气泡：Qt/系统不会自动隐藏
+    int m_lastEnergyIdx = -1;     // 当前被放大的柱
+    int m_lastOrdersIdx = -1;
+
+    QStringList m_dayDates;
+    QList<double> m_dayAmounts;
+    QList<double> m_dayEnergies;
+    QList<double> m_dayOrders;
 };

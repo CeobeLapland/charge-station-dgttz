@@ -1,14 +1,19 @@
 #include "ui/pages/SalesPage.h"
 
+#include <QCursor>
 #include <QColor>
 #include <QComboBox>
+#include <QEvent>
 #include <QFont>
 #include <QGroupBox>
+#include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QLabel>
 #include <QPainter>
+#include <QPoint>
+#include <QScreen>
 #include <QVBoxLayout>
 
 #include <QtCharts/QBarSet>
@@ -22,29 +27,28 @@ namespace {
 QString money(double v) {
     return QString::number(v, 'f', 2) + QStringLiteral(" 元");
 }
-
-// 让分类轴标签斜放 + 缩小，避免 X 轴糊成一片
 void styleCategoryAxis(QBarCategoryAxis* axis) {
     axis->setLabelsAngle(-60);
     QFont f = axis->labelsFont();
     f.setPointSize(7);
     axis->setLabelsFont(f);
 }
-
-// 重建某个柱状 series（单个 QBarSet）
-void rebuildBarSet(QBarSeries* series, const QString& setLabel, const QList<double>& values,
-                   const QColor& color) {
+void dropBarSets(QBarSeries* series) {
     while (!series->barSets().isEmpty()) {
         QBarSet* s = series->barSets().first();
         series->take(s);
         delete s;
     }
-    auto* set = new QBarSet(setLabel);
+}
+QBarSet* addBarSet(QBarSeries* series, const QString& label, const QList<double>& values,
+                   const QColor& color) {
+    auto* set = new QBarSet(label);
     set->setColor(color);
     for (double v : values) {
         *set << v;
     }
     series->append(set);
+    return set;
 }
 }  // namespace
 
@@ -53,11 +57,19 @@ SalesPage::SalesPage(ApiClient* api, QWidget* parent)
     auto* title = new QLabel(QStringLiteral("销售业绩"));
     title->setObjectName(QStringLiteral("pageTitle"));
 
+    // 自绘气泡：鼠标穿透 + 无边框置顶，显示/隐藏完全由代码控制
+    m_tip = new QLabel(this, Qt::ToolTip | Qt::FramelessWindowHint);
+    m_tip->setAttribute(Qt::WA_ShowWithoutActivating);
+    m_tip->setAttribute(Qt::WA_TransparentForMouseEvents);
+    m_tip->setStyleSheet(QStringLiteral(
+        "QLabel { color:#e8eef4; background-color:#1e2733;"
+        " border:1px solid #ffffff; padding:5px; }"));
+    m_tip->hide();
+
     m_rangeCombo = new QComboBox;
     m_rangeCombo->addItem(QStringLiteral("近 7 日"), 7);
     m_rangeCombo->addItem(QStringLiteral("近 30 日"), 30);
 
-    // ---- 4 张指标卡 ----
     auto* metricRow = new QHBoxLayout;
     auto makeMetric = [](const QString& caption, QLabel*& valueLabel, QGroupBox** boxPtr = nullptr) {
         auto* box = new QGroupBox(caption);
@@ -75,11 +87,11 @@ SalesPage::SalesPage(ApiClient* api, QWidget* parent)
     metricRow->addWidget(makeMetric(QStringLiteral("本月营收"), m_monthLabel));
     metricRow->addWidget(makeMetric(QStringLiteral("总营收"), m_totalLabel));
 
-    // ---- 折线：营收趋势（日期 X 轴 + 加粗线 + 每点大标记）----
+    // ============ 折线 ============
     auto* lineChart = new QChart;
     lineChart->setTitle(QStringLiteral("营收趋势"));
-    lineChart->legend()->hide();
     lineChart->setAnimationOptions(QChart::AllAnimations);
+    lineChart->legend()->hide();
     m_lineSeries = new QLineSeries;
     QPen linePen(QColor(0x4f, 0x9e, 0xff));
     linePen.setWidth(2);
@@ -102,10 +114,33 @@ SalesPage::SalesPage(ApiClient* api, QWidget* parent)
     m_lineChartView = new QChartView(lineChart);
     m_lineChartView->setRenderHint(QPainter::Antialiasing);
 
-    // ---- 柱状（合并）：充电量(左轴) + 订单量(右轴) ----
+    connect(m_lineSeries, &QLineSeries::hovered, this, [this](const QPointF& pt, bool state) {
+        if (!state) {
+            return;   // 悬停期间不隐藏气泡
+        }
+        const int idx = qRound(pt.x());
+        if (idx < 0 || idx >= m_dayAmounts.size() || qAbs(pt.x() - idx) > 0.5) {
+            return;
+        }
+        showTipText(QStringLiteral("%1\n营收：%2")
+                        .arg(m_dayDates.at(idx), money(m_dayAmounts.at(idx))));
+    });
+    connect(m_scatterSeries, &QScatterSeries::hovered, this, [this](const QPointF& pt, bool state) {
+        if (!state) {
+            return;
+        }
+        const int idx = qRound(pt.x());
+        if (idx < 0 || idx >= m_dayAmounts.size() || qAbs(pt.x() - idx) > 0.5) {
+            return;
+        }
+        showTipText(QStringLiteral("%1\n营收：%2")
+                        .arg(m_dayDates.at(idx), money(m_dayAmounts.at(idx))));
+    });
+
+    // ============ 柱状（合并双轴） ============
     auto* barChart = new QChart;
-    barChart->setAnimationOptions(QChart::AllAnimations);
     barChart->setTitle(QStringLiteral("每日充电量与订单量"));
+    barChart->setAnimationOptions(QChart::AllAnimations);
     barChart->legend()->setVisible(true);
     barChart->legend()->setAlignment(Qt::AlignBottom);
     m_energySeries = new QBarSeries;
@@ -130,15 +165,20 @@ SalesPage::SalesPage(ApiClient* api, QWidget* parent)
     m_barView = new QChartView(barChart);
     m_barView->setRenderHint(QPainter::Antialiasing);
 
-    // ---- 饼图：站点营收占比 ----
+    // ============ 饼图 ============
     auto* pieChart = new QChart;
     pieChart->setTitle(QStringLiteral("站点营收占比"));
-    pieChart->legend()->hide();
     pieChart->setAnimationOptions(QChart::AllAnimations);
+    pieChart->legend()->hide();
     m_pieSeries = new QPieSeries;
     pieChart->addSeries(m_pieSeries);
     m_pieView = new QChartView(pieChart);
     m_pieView->setRenderHint(QPainter::Antialiasing);
+
+    // 鼠标真正离开图表才隐藏气泡
+    m_lineChartView->installEventFilter(this);
+    m_barView->installEventFilter(this);
+    m_pieView->installEventFilter(this);
 
     auto* topRow = new QHBoxLayout;
     topRow->addWidget(title);
@@ -171,18 +211,27 @@ void SalesPage::refresh(int days) {
         }
         const QJsonArray trend = payload.value(QStringLiteral("trend")).toArray();
 
-        QStringList categories;
+        m_lastEnergyIdx = -1;
+        m_lastOrdersIdx = -1;
+        m_tip->hide();
+
+        QStringList categories, fullDates;
         QList<double> amounts, energyVals, orderVals;
         for (int i = 0; i < trend.size(); ++i) {
             const QJsonObject item = trend.at(i).toObject();
             const QString date = item.value(QStringLiteral("date")).toString();
+            fullDates << date;
             categories << (date.size() >= 10 ? date.mid(5) : date);
             amounts << item.value(QStringLiteral("amount")).toDouble();
             energyVals << item.value(QStringLiteral("energy")).toDouble();
             orderVals << item.value(QStringLiteral("orders")).toDouble();
         }
+        m_dayDates = fullDates;
+        m_dayAmounts = amounts;
+        m_dayEnergies = energyVals;
+        m_dayOrders = orderVals;
 
-        // 折线（每个点加标记）
+        // ---- 折线 ----
         m_lineSeries->clear();
         m_scatterSeries->clear();
         double maxAmount = 1.0, rangeSum = 0.0;
@@ -195,11 +244,13 @@ void SalesPage::refresh(int days) {
         m_lineAxisX->setCategories(categories);
         m_lineAxisY->setRange(0, maxAmount * 1.2);
 
-        // 柱状（双轴）
-        rebuildBarSet(m_energySeries, QStringLiteral("充电量(kWh)"), energyVals,
-                      QColor(0x4f, 0x9e, 0xff));
-        rebuildBarSet(m_ordersSeries, QStringLiteral("订单量(单)"), orderVals,
-                      QColor(0xff, 0xb0, 0x4d));
+        // ---- 柱状（悬停该柱放大 10%，移开还原）----
+        dropBarSets(m_energySeries);
+        dropBarSets(m_ordersSeries);
+        m_energySet = addBarSet(m_energySeries, QStringLiteral("充电量(kWh)"),
+                                energyVals, QColor(0x4f, 0x9e, 0xff));
+        m_ordersSet = addBarSet(m_ordersSeries, QStringLiteral("订单量(单)"),
+                                orderVals, QColor(0xff, 0xb0, 0x4d));
         m_barAxisX->setCategories(categories);
         double maxE = 1.0, maxO = 1.0;
         for (double v : energyVals) maxE = qMax(maxE, v);
@@ -207,9 +258,40 @@ void SalesPage::refresh(int days) {
         m_energyAxisY->setRange(0, maxE * 1.2);
         m_ordersAxisY->setRange(0, maxO * 1.2);
 
+        auto bindBarHover = [this](QBarSet* set, bool isEnergy, int& lastIdx) {
+            connect(set, &QBarSet::hovered, this,
+                    [this, set, isEnergy, &lastIdx](bool state, int index) {
+                const QList<double>& vals = isEnergy ? m_dayEnergies : m_dayOrders;
+                if (!state) {
+                    if (lastIdx >= 0 && lastIdx < set->count()) {
+                        set->replace(lastIdx, vals.at(lastIdx));
+                    }
+                    lastIdx = -1;
+                    return;
+                }
+                if (index < 0 || index >= m_dayDates.size()) {
+                    return;
+                }
+                if (lastIdx >= 0 && lastIdx < set->count()) {
+                    set->replace(lastIdx, vals.at(lastIdx));
+                }
+                set->replace(index, vals.at(index) * 1.20);
+                lastIdx = index;
+                const QString text =
+                    isEnergy
+                        ? QStringLiteral("%1\n充电量：%2 kWh")
+                              .arg(m_dayDates.at(index), QString::number(vals.at(index), 'f', 1))
+                        : QStringLiteral("%1\n订单量：%2 单")
+                              .arg(m_dayDates.at(index), QString::number(vals.at(index), 'f', 0));
+                showTipText(text);
+            });
+        };
+        bindBarHover(m_energySet, true, m_lastEnergyIdx);
+        bindBarHover(m_ordersSet, false, m_lastOrdersIdx);
+
         updateMetrics(payload, days, rangeSum);
 
-        // 饼图
+        // ---- 饼图 ----
         while (!m_pieSeries->isEmpty()) {
             m_pieSeries->remove(m_pieSeries->slices().first());
         }
@@ -224,14 +306,25 @@ void SalesPage::refresh(int days) {
             QColor(0xb3, 0x88, 0xff)};
         for (int i = 0; i < shares.size(); ++i) {
             const QJsonObject s = shares.at(i).toObject();
+            const QString name = s.value(QStringLiteral("name")).toString();
             const double v = s.value(QStringLiteral("value")).toDouble();
             const double pct = shareTotal > 0.0 ? (v / shareTotal * 100.0) : 0.0;
-            QPieSlice* slice = m_pieSeries->append(s.value(QStringLiteral("name")).toString(), v);
+            QPieSlice* slice = m_pieSeries->append(name, v);
             slice->setColor(pieColors.at(i % pieColors.size()));
-            slice->setLabel(QStringLiteral("%1\n%2%")
-                                .arg(s.value(QStringLiteral("name")).toString())
-                                .arg(pct, 0, 'f', 1));
+            slice->setBorderColor(QColor(0xff, 0xff, 0xff));
+            slice->setLabel(QStringLiteral("%1\n%2%").arg(name).arg(pct, 0, 'f', 1));
             slice->setLabelVisible(true);
+            connect(slice, &QPieSlice::hovered, this,
+                    [this, slice, name, v, pct](bool state) {
+                slice->setExploded(state);
+                if (state) {
+                    slice->setLabelVisible(true);
+                    showTipText(QStringLiteral("%1\n营收：%2\n占比：%3%")
+                                    .arg(name, money(v)).arg(pct, 0, 'f', 1));
+                } else {
+                    slice->setExploded(false);
+                }
+            });
         }
     });
 }
@@ -243,4 +336,37 @@ void SalesPage::updateMetrics(const QJsonObject& payload, int days, double range
     m_rangeLabel->setText(money(range));
     m_monthLabel->setText(money(payload.value(QStringLiteral("month")).toDouble()));
     m_totalLabel->setText(money(payload.value(QStringLiteral("total")).toDouble()));
+}
+
+void SalesPage::showTipText(const QString& text) {
+    m_tip->setText(text);
+    m_tip->adjustSize();
+    QPoint pos = QCursor::pos() + QPoint(14, 16);
+    if (QScreen* screen = QGuiApplication::screenAt(QCursor::pos())) {
+        const QRect g = screen->availableGeometry();
+        if (pos.x() + m_tip->width() > g.right()) pos.setX(g.right() - m_tip->width());
+        if (pos.y() + m_tip->height() > g.bottom()) pos.setY(g.bottom() - m_tip->height());
+        if (pos.x() < g.left()) pos.setX(g.left());
+        if (pos.y() < g.top()) pos.setY(g.top());
+    }
+    m_tip->move(pos);
+    m_tip->show();
+    m_tip->raise();
+}
+
+void SalesPage::hideTip() {
+    m_tip->hide();
+}
+
+bool SalesPage::eventFilter(QObject* watched, QEvent* event) {
+    if (event->type() == QEvent::Leave &&
+        (watched == m_lineChartView || watched == m_barView || watched == m_pieView)) {
+        if (auto* view = qobject_cast<QWidget*>(watched)) {
+            const QRect globalRect(view->mapToGlobal(QPoint(0, 0)), view->size());
+            if (!globalRect.contains(QCursor::pos())) {   // 鼠标真在图表外才隐藏
+                m_tip->hide();
+            }
+        }
+    }
+    return QWidget::eventFilter(watched, event);
 }
