@@ -40,11 +40,7 @@
       const alarm = window.ScreenAdapter.normalizeAlarm(message.payload?.alarm ?? message.payload);
       const alarms = [alarm, ...data.alarms.filter((item) => item.id !== alarm.id)]
         .slice(0, window.ScreenConfig.maxAlarms);
-      const alarmEvent = window.ScreenAdapter.normalizeEvent({
-        id: `alarm-${alarm.id}`,
-        event_time: alarm.occur_time,
-        text: `${alarm.station_name}${alarm.charger_id == null ? "" : ` · 桩 ${alarm.charger_id}`}发生${alarm.type}告警`
-      });
+      const alarmEvent = window.ScreenAdapter.alarmAsEvent(alarm);
       const events = [alarmEvent, ...data.events.filter((item) => item.id !== alarmEvent.id)]
         .slice(0, window.ScreenConfig.maxEvents);
       update({ data: { ...data, alarms, events }, lastUpdated: new Date(), stale: false });
@@ -56,15 +52,6 @@
       const events = [event, ...data.events.filter((item) => item.id !== event.id)]
         .slice(0, window.ScreenConfig.maxEvents);
       update({ data: { ...data, events }, lastUpdated: new Date(), stale: false });
-      return;
-    }
-
-    if (message.type === "push.forecast") {
-      const forecast = window.ScreenAdapter.normalizeForecastSeries(message.payload?.series);
-      update({
-        data: { ...data, load_series: { ...data.load_series, forecast } },
-        lastUpdated: new Date(), stale: false
-      });
       return;
     }
 
@@ -88,7 +75,10 @@
         const event = window.ScreenAdapter.normalizeEvent({
           id: `charger-${chargerId}-${message.payload.status}-${Date.now()}`,
           event_time: new Date().toISOString(),
-          text: `电桩 ${chargerId} 状态更新为${statusLabels[message.payload.status] ?? "未知"}`
+          event_type: "charger_status",
+          category: "hardware",
+          target: `电桩 ${chargerId}`,
+          text: `状态更新为${statusLabels[message.payload.status] ?? "未知"}`
         });
         const events = [event, ...state.data.events].slice(0, window.ScreenConfig.maxEvents);
         update({ data: { ...state.data, events }, lastUpdated: new Date(), stale: false });

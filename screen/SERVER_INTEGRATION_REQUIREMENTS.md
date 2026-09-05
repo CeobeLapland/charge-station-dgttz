@@ -1,8 +1,8 @@
 # Web 大屏服务端接口交接说明
 
 面向：服务端开发负责人  
-更新时间：2026-09-04  
-优先级说明：P0 为大屏完成联调必须具备，P1 为完整实时效果必须具备，P2 为预测增强功能。
+更新时间：2026-09-05
+优先级说明：P0 为大屏完成联调必须具备，P1 为完整实时效果必须具备。根据当前产品要求，大屏不展示预测数据，只展示已经发生的准确数据。
 
 ## 1. 大屏接入方式
 
@@ -60,8 +60,8 @@ ws://127.0.0.1:9000
 | `push.alarm` | 未完成 |
 | `push.order_event` | 未完成 |
 | 实际负荷实时更新 | 未完成 |
-| `push.forecast` | 未完成 |
-| `ml.forecast` | 当前固定返回 `5001` |
+| 当前总功率与使用中电站数 | 快照字段待补充 |
+| 单站功率与历史序列 | 快照字段待补充 |
 
 当前全量快照已经能被大屏正确解析。接下来服务端的重点是补齐业务事件推送，而不是重新设计快照字段。
 
@@ -101,14 +101,13 @@ ws://127.0.0.1:9000
       "today_orders": 386,
       "charging_count": 48,
       "online_rate": 96.2,
+      "current_power_kw": 875.0,
+      "active_station_count": 5,
       "revenue_change_pct": 12.8,
       "orders_change_pct": 8.4
     },
     "stations": [],
-    "load_series": {
-      "actual": [],
-      "forecast": []
-    },
+    "load_series": { "actual": [] },
     "utilization_rank": [],
     "alarms": [],
     "user_growth": [],
@@ -132,6 +131,8 @@ ws://127.0.0.1:9000
 | `online_rate` | number | % | 非 `offline/fault` 桩数 ÷ 总桩数 × 100，返回 0–100 |
 | `revenue_change_pct` | number | % | 今日营收较昨日同期变化率 |
 | `orders_change_pct` | number | % | 今日订单较昨日同期变化率 |
+| `current_power_kw` | number | kW | 全网当前总功率，取最新有效采样点 |
+| `active_station_count` | integer | 座 | 当前至少有一个充电中设备的电站数量 |
 
 ### 3.4 快照数组字段
 
@@ -146,7 +147,12 @@ ws://127.0.0.1:9000
   "load_rate": 88.0,
   "idle_chargers": 2,
   "total_chargers": 18,
-  "today_revenue": 5260.0
+  "today_revenue": 5260.0,
+  "power_kw": 246.0,
+  "power_series": [
+    { "timestamp": "2026-09-05 18:00:00", "value_kw": 238.0 },
+    { "timestamp": "2026-09-05 18:05:00", "value_kw": 246.0 }
+  ]
 }
 ```
 
@@ -159,16 +165,7 @@ ws://127.0.0.1:9000
 }
 ```
 
-`load_series.forecast[]`：
-
-```json
-{
-  "timestamp": "2026-09-04 19:00:00",
-  "value_kw": 902.4,
-  "lower_kw": 866.1,
-  "upper_kw": 938.7
-}
-```
+每个 `load_series.actual[]` 点还需要提供 `active_station_count`，用于在同一时间轴展示功率与正在使用的电站数量。
 
 `utilization_rank[]`：
 
@@ -330,6 +327,8 @@ ws://127.0.0.1:9000
       "id": "evt-o1002-order_completed",
       "event_time": "2026-09-04 18:12:00",
       "event_type": "order_completed",
+      "category": "user",
+      "target": "订单 #1002",
       "text": "用户 189****4421 完成充电并结算"
     }
   }
@@ -372,36 +371,17 @@ ws://127.0.0.1:9000
 
 由大屏每 15–30 秒重新请求 `screen.snapshot`。该方案不需要新增消息，但会重复执行全部聚合查询，只建议联调阶段使用。
 
-## 9. P2：预测推送
+## 9. 事件分类
 
-消息：`push.forecast`
+所有事件建议增加 `category` 和 `target`：
 
-机器学习模块产生新预测后发送：
+- `system`：系统事件。
+- `user`：用户及订单事件。
+- `hardware`：电桩及硬件事件。
+- `station`：电站运营事件。
+- `alarm`：告警事件。
 
-```json
-{
-  "type": "push.forecast",
-  "payload": {
-    "station_id": null,
-    "horizon": 6,
-    "series": [
-      {
-        "timestamp": "2026-09-04 19:00:00",
-        "value_kw": 930.5,
-        "lower_kw": 890.0,
-        "upper_kw": 970.0
-      }
-    ]
-  }
-}
-```
-
-约定：
-
-- `station_id = null` 表示全网预测。
-- `horizon` 单位为小时，可取 `1`、`6`、`24`。
-- `value_kw`、`lower_kw`、`upper_kw` 单位全部为 kW。
-- 预测不可用时返回错误码 `5001`，不得伪造预测数据。
+`target` 是关联对象的简短名称，例如电站名称、电桩编号或订单编号。新告警仍使用 `push.alarm`，前端会自动合并进事件页的“警告”分类。
 
 ## 10. 时间、单位和枚举
 
@@ -419,7 +399,6 @@ ws://127.0.0.1:9000
 
 - `push.alarm`：管理端、大屏。
 - `push.order_event`：大屏。
-- `push.forecast`：大屏及确实需要预测的客户端。
 - `push.charger_status`：管理端、大屏，用户端按业务需要订阅。
 
 联调阶段可以暂时全量广播，但客户端必须忽略不认识的推送，不能因此断开连接。
@@ -433,7 +412,10 @@ ws://127.0.0.1:9000
 - [ ] 新告警写库后发送 `push.alarm`。
 - [ ] 订单关键状态变化后发送 `push.order_event`。
 - [ ] 确定实际负荷采用推送还是临时定时快照。
-- [ ] 机器学习完成后发送 `push.forecast`。
+- [ ] 快照提供 `current_power_kw` 和 `active_station_count`。
+- [ ] 实际负荷的每个时间点提供 `active_station_count`。
+- [ ] `stations[]` 提供单站 `power_kw` 与 `power_series[]`。
+- [ ] 事件提供 `category` 与 `target`，告警继续由 `push.alarm` 推送。
 - [ ] 站点级告警明确输出 `"charger_id": null`。
 - [ ] 确认跨机器访问的 IP、端口和防火墙。
 - [ ] 后续按客户端角色限制广播范围。
@@ -449,6 +431,6 @@ ws://127.0.0.1:9000
 7. 创建、开始和结算订单，事件流应自动出现对应事件。
 8. 写入新的负荷采样点，曲线应按最终约定自动更新。
 9. 停止服务端，大屏应显示重连状态；恢复服务端后应自动重连并重新拉取快照。
-10. 预测模块不可用时，大屏只显示实际负荷，不出现虚假预测线。
+10. 搜索并选择任一电站，详情区应显示该站当前功率和历史功率曲线。
 
 完成第 1–7 项后，基础大屏即可达到可验收的实时联调状态。
