@@ -154,6 +154,22 @@ QJsonArray& userCache() {
     return cache;
 }
 
+QJsonArray& salesCache() {
+    static QJsonArray cache = [] {
+        QJsonArray arr;
+        for (int i = 29; i >= 0; --i) {   // arr[0]=29天前 ... arr[29]=今天
+            const double amount = 1200.0 + ((i * 7919) % 2400) + (i == 0 ? 186.5 : 0);
+            QJsonObject item;
+            item.insert(QStringLiteral("date"), dateOffset(i));
+            item.insert(QStringLiteral("amount"), amount);
+            item.insert(QStringLiteral("energy"), qRound(amount / 1.2 * 10.0) / 10.0);
+            item.insert(QStringLiteral("orders"), qMax(3, qRound(amount / 60.0)));
+            arr.append(item);
+        }
+        return arr;
+    }();
+    return cache;
+}
 }  // namespace
 
 QJsonObject MockDataProvider::okPayload(const QJsonObject& payload) {
@@ -185,21 +201,49 @@ QJsonObject MockDataProvider::adminLogin(const QString& account, const QString& 
 }
 
 QJsonObject MockDataProvider::revenue(int days) {
-    QJsonArray trend;
-    double total = 0.0;
-    for (int i = days - 1; i >= 0; --i) {
-        const double amount = 1200.0 + ((i * 7919) % 2400) + (i == 0 ? 186.5 : 0);
-        QJsonObject item;
-        item.insert(QStringLiteral("date"), dateOffset(i));
-        item.insert(QStringLiteral("amount"), amount);
-        trend.append(item);
-        total += amount;
+    if (days <= 0 || days > 30) {
+        days = 7;
     }
+    const QJsonArray all = salesCache();   // all[0]=29天前 ... all[29]=今天
+    const QString month = QDate::currentDate().toString(QStringLiteral("yyyy-MM"));
+
+    QJsonArray trend;
+    double range = 0.0;
+    for (int i = all.size() - days; i < all.size(); ++i) {
+        const QJsonObject item = all.at(i).toObject();
+        trend.append(item);
+        range += item.value(QStringLiteral("amount")).toDouble();
+    }
+
+    double today = 0.0, monthSum = 0.0, totalSum = 0.0;
+    for (const QJsonValue& v : all) {
+        const QJsonObject it = v.toObject();
+        totalSum += it.value(QStringLiteral("amount")).toDouble();
+        if (it.value(QStringLiteral("date")).toString().startsWith(month)) {
+            monthSum += it.value(QStringLiteral("amount")).toDouble();
+        }
+    }
+    today = all.last().toObject().value(QStringLiteral("amount")).toDouble();
+
+    // 站点营收占比（Mock：按所选区间金额分摊到 5 个站）
+    QJsonArray shares;
+    const QJsonArray stations = stationCache();
+    const QVector<double> weights = {0.30, 0.24, 0.18, 0.16, 0.12};
+    for (int i = 0; i < stations.size() && i < weights.size(); ++i) {
+        QJsonObject s;
+        s.insert(QStringLiteral("name"),
+                 stations.at(i).toObject().value(QStringLiteral("name")).toString());
+        s.insert(QStringLiteral("value"), range * weights[i]);
+        shares.append(s);
+    }
+
     QJsonObject payload;
     payload.insert(QStringLiteral("trend"), trend);
-    payload.insert(QStringLiteral("today"), trend.at(0).toObject().value(QStringLiteral("amount")).toDouble());
-    payload.insert(QStringLiteral("month"), total);
-    payload.insert(QStringLiteral("total"), total * 3.2);
+    payload.insert(QStringLiteral("today"), today);
+    payload.insert(QStringLiteral("range"), range);
+    payload.insert(QStringLiteral("month"), monthSum);
+    payload.insert(QStringLiteral("total"), totalSum * 3.2);
+    payload.insert(QStringLiteral("station_share"), shares);
     return okPayload(payload);
 }
 
