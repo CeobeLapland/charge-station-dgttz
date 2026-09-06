@@ -18,7 +18,7 @@ Item {
     readonly property var myLoc: { "lng": 116.397128, "lat": 39.916527 }   // 模拟定位（北京·朝阳）
     readonly property var stationsAll: ExploreData.stations()
     readonly property var vehiclesData: UserData.vehicles()
-    readonly property var chargingOrders: {          // 正在充电订单：实时流程优先级高（可多笔种子兜底）
+    readonly property var activeOrders: {         // 进行中行程：实时流程优先（含排队/已预约/充电/待结算），叠加种子充电订单
         var out = []
         var cur = ChargingFlow.currentOrder
         if (cur && cur.live) out.push(cur)
@@ -69,6 +69,35 @@ Item {
         if (c === "hot") return qsTr("高温")
         if (c === "extreme") return qsTr("极端")
         return c
+    }
+
+    // —— 进行中行程的展示辅助（覆盖排队/已预约/充电/待结算）——
+    function pad2(n) { return (n < 10 ? "0" : "") + n }
+    function mmss(sec) {
+        var s = Math.max(0, Number(sec || 0))
+        return pad2(Math.floor(s / 60)) + ":" + pad2(s % 60)
+    }
+    function stageEmoji(o) {
+        if (o.status === "queued") return "\u{1F552}"
+        if (o.status === "reserved") return "\u{1F4C5}"
+        if (o.status === "pending_settle") return "\u{1F4B0}"
+        return "\u26A1"
+    }
+    function stageText(o) {
+        if (o.status === "queued")
+            return qsTr("排队中 · 序号 ") + (o.queue_no || "") + qsTr(" · 约 ") + Number(o.estimate_wait_min || 0) + qsTr(" 分钟")
+        if (o.status === "reserved")
+            return qsTr("待扫码 · 剩 ") + root.mmss(o.scan_remaining_sec)
+        if (o.status === "pending_settle")
+            return qsTr("待结算")
+        if (o.live)
+            return qsTr("电量 ") + Math.round(Number(o.soc || o.start_soc || 0)) + qsTr("%（目标 ") + Number(o.target_soc || 0) + qsTr("%）")
+        return qsTr("电量 ") + Number(o.start_soc || 0) + "% → " + Number(o.target_soc || 0) + "%"
+    }
+    function stageColor(o) {
+        if (o.status === "reserved") return Theme.danger
+        if (o.status === "pending_settle") return "#FFE08A"
+        return "#ffffff"
     }
 
     // ===================== 筛选 / 排序 =====================
@@ -378,24 +407,24 @@ Item {
             // —— 正在充电栏 ——
             Rectangle {
                 Layout.fillWidth: true
-                Layout.preferredHeight: root.chargingOrders.length ? 72 : 34
+                Layout.preferredHeight: root.activeOrders.length ? 72 : 34
                 color: Theme.card
                 border.color: Theme.border
                 border.width: 1
                 radius: Theme.radiusSmall
                 Text {
-                    visible: !root.chargingOrders.length
+                    visible: !root.activeOrders.length
                     anchors.centerIn: parent
-                    text: qsTr("当前没有正在充电的订单")
+                    text: qsTr("当前没有进行中的行程")
                     color: Theme.textSecondary; font.pixelSize: Theme.fontSizeSmall
                 }
                 ListView {
                     id: chargingListView
-                    visible: root.chargingOrders.length
+                    visible: root.activeOrders.length
                     anchors.fill: parent
                     orientation: Qt.Horizontal
                     clip: true
-                    model: root.chargingOrders
+                    model: root.activeOrders
                     spacing: 10
                     topMargin: 6; bottomMargin: 6
                     leftMargin: 10; rightMargin: 10
@@ -412,14 +441,14 @@ Item {
                             spacing: 4
                             Row {
                                 spacing: 8; width: parent.width
-                                Text { text: "\u{26A1}"; font.pixelSize: 14 }
+                                Text { text: root.stageEmoji(modelData); font.pixelSize: 14 }
                                 Text {
                                     width: modelData.live ? 150 : 210
                                     text: modelData.station_name || ""
                                     color: "#ffffff"; font.bold: true; font.pixelSize: Theme.fontSizeSmall
                                     elide: Text.ElideRight
                                 }
-                                // 实时订单：标注「实时」角标
+                                // 实时流程：标注「实时」角标
                                 Rectangle {
                                     visible: !!modelData.live
                                     width: 30; height: 16; radius: 4
@@ -428,15 +457,12 @@ Item {
                                 }
                             }
                             Row { spacing: 12
-                                Text { text: modelData.charger_code || ""; color: "#E6F0FF"; font.pixelSize: Theme.fontSizeTiny }
-                                Text { text: (modelData.charger_type === "fast" ? qsTr("快充") : qsTr("慢充")); color: "#E6F0FF"; font.pixelSize: Theme.fontSizeTiny }
+                                Text { visible: modelData.status !== "queued"; text: modelData.charger_code || ""; color: "#E6F0FF"; font.pixelSize: Theme.fontSizeTiny }
+                                Text { visible: modelData.status !== "queued"; text: (modelData.charger_type === "fast" ? qsTr("快充") : qsTr("慢充")); color: "#E6F0FF"; font.pixelSize: Theme.fontSizeTiny }
                                 Text {
-                                    color: "#ffffff"; font.pixelSize: Theme.fontSizeTiny; font.bold: true
-                                    text: modelData.live
-                                          ? (modelData.status === "pending_settle"
-                                             ? qsTr("待结算")
-                                             : qsTr("电量 ") + Math.round(Number(modelData.soc || modelData.start_soc || 0)) + "%（目标 " + Number(modelData.target_soc || 0) + "%）")
-                                          : qsTr("电量 ") + Number(modelData.start_soc || 0) + "% → " + Number(modelData.target_soc || 0) + "%"
+                                    color: root.stageColor(modelData); font.pixelSize: Theme.fontSizeTiny; font.bold: true
+                                    text: root.stageText(modelData)
+                                    elide: Text.ElideRight
                                 }
                             }
                         }
@@ -444,10 +470,12 @@ Item {
                             anchors.fill: parent
                             onClicked: {
                                 if (modelData.live) {
-                                    // 实时流程：充电中→充电页；待结算→结算页
-                                    root.stackView.push(modelData.status === "pending_settle"
-                                        ? "qrc:/UserClient/qml/pages/SettlePage.qml"
-                                        : "qrc:/UserClient/qml/pages/ChargingPage.qml")
+                                    // 实时流程：按当前阶段回对应页
+                                    var page = ({ queued: "QueuePage",
+                                                  reserved: "ReservedPage",
+                                                  charging: "ChargingPage",
+                                                  pending_settle: "SettlePage" })[modelData.status]
+                                    root.stackView.push("qrc:/UserClient/qml/pages/" + page + ".qml")
                                 } else {
                                     // 种子历史订单：进订单详情
                                     root.stackView.push("qrc:/UserClient/qml/pages/OrderPage.qml",

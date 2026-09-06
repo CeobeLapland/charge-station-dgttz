@@ -13,8 +13,16 @@ Item {
     readonly property var st: ExploreData.stationById(stationId) || ({})
     readonly property var chargers: ExploreData.chargersForStation(stationId)
     readonly property var priceRules: ExploreData.priceRulesForStation(stationId)
-    readonly property var reviews: ExploreData.reviewsForStation(stationId)
+    property var reviews: []
     readonly property var weather: ExploreData.weatherForArea((st.weather_area || st.area) || "")
+
+    // 评论刷新：发评论/点赞/回复后由 ExploreData.reviewsChanged 触发
+    function reloadReviews() { reviews = ExploreData.reviewsForStation(stationId) }
+    Connections {
+        target: ExploreData
+        function onReviewsChanged() { reloadReviews() }
+    }
+    readonly property var myNickname: UserData.profile().nickname || ""
 
     function statusLabel(s) {
         if (s === "idle")      return qsTr("空闲")
@@ -76,7 +84,7 @@ Item {
     // 收藏按钮（右上角，点击收藏/取消）
     property bool isFavorite: false
     function refreshFav() { root.isFavorite = UserData.isFavorite(stationId) }
-    Component.onCompleted: refreshFav()
+    Component.onCompleted: { refreshFav(); reloadReviews() }
     Connections { target: UserData; function onFavoritesChanged() { refreshFav() } }
     Rectangle {
         anchors.top: parent.top; anchors.topMargin: 18
@@ -275,6 +283,23 @@ Item {
 
             // 评价
             SectionTitle { text: qsTr("用户评价") }
+            Row {
+                width: parent.width
+                Rectangle {
+                    width: 84; height: 30; radius: 15
+                    color: Theme.primary
+                    Text {
+                        anchors.centerIn: parent; text: qsTr("写评价");
+                        color: "#ffffff"; font.pixelSize: Theme.fontSizeSmall; font.bold: true
+                    }
+                    MouseArea { anchors.fill: parent; onClicked: reviewDialog.open() }
+                }
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: qsTr("共 ") + (reviews.length||0) + qsTr(" 条")
+                    color: Theme.textSecondary; font.pixelSize: Theme.fontSizeTiny
+                }
+            }
             Column {
                 width: parent.width; spacing: 10
                 Repeater {
@@ -283,20 +308,29 @@ Item {
                         width: parent.width
                         height: reviewCol.implicitHeight + 20
                         color: Theme.card; radius: Theme.radiusSmall; border.color: Theme.border
+                        function submitReply() {
+                            var t = replyInput.text
+                            if (!t || !t.trim()) return
+                            ExploreData.addReply(modelData.id, root.myNickname, t.trim())
+                            replyInput.text = ""
+                            replyBox.visible = false
+                        }
                         Column {
                             id: reviewCol
                             width: parent.width - 24
                             anchors.left: parent.left; anchors.leftMargin: 12
                             anchors.top: parent.top; anchors.topMargin: 10
                             spacing: 6
-                            Row {
+                            RowLayout {
                                 width: parent.width
                                 Text { text: modelData.nickname || ""; font.bold: true; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeSmall }
                                 Item { width: 8; height: 1 }
                                 Text { text: "⭐ " + Number(modelData.overall_score || 0).toFixed(1); color: "#F59E0B"; font.bold: true; font.pixelSize: Theme.fontSizeSmall }
+                                Item { Layout.fillWidth: true; height: 1 }
+                                Text { visible: !!modelData.is_mine; text: qsTr("我"); color: Theme.primary; font.pixelSize: Theme.fontSizeTiny; font.bold: true }
                             }
                             Text { width: parent.width; text: modelData.content || ""; wrapMode: Text.Wrap; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeSmall }
-                            Row {
+                            RowLayout {
                                 width: parent.width; spacing: 8
                                 Repeater {
                                     model: modelData.tags || []
@@ -304,8 +338,71 @@ Item {
                                         text: "#" + modelData; color: Theme.accent; font.pixelSize: Theme.fontSizeTiny
                                     }
                                 }
-                                Item { Layout.fillWidth: true; width: 1; height: 1 }
-                                Text { text: qsTr("有用 ") + (modelData.useful_count || 0) + " · " + (modelData.create_time || ""); color: Theme.textSecondary; font.pixelSize: Theme.fontSizeTiny }
+                                Item { Layout.fillWidth: true; height: 1 }
+                                // 点赞「有用」
+                                Rectangle {
+                                    Layout.alignment: Qt.AlignVCenter
+                                    width: useTxt.implicitWidth + 14; height: 22; radius: 11
+                                    color: modelData.liked_by_me ? "#F59E0B22" : "transparent"
+                                    border.color: modelData.liked_by_me ? "#F59E0B" : Theme.border; border.width: 1
+                                    Text {
+                                        id: useTxt; anchors.centerIn: parent
+                                        text: "\u{1F44D} 有用 " + (modelData.useful_count||0)
+                                        color: modelData.liked_by_me ? "#F59E0B" : Theme.textSecondary
+                                        font.pixelSize: 11; font.bold: modelData.liked_by_me
+                                    }
+                                    MouseArea { anchors.fill: parent; onClicked: ExploreData.toggleUseful(modelData.id) }
+                                }
+                                // 回复
+                                Rectangle {
+                                    Layout.alignment: Qt.AlignVCenter
+                                    width: repTxt.implicitWidth + 14; height: 22; radius: 11
+                                    color: "transparent"; border.color: Theme.border; border.width: 1
+                                    Text { id: repTxt; anchors.centerIn: parent; text: qsTr("回复"); color: Theme.textSecondary; font.pixelSize: 11 }
+                                    MouseArea { anchors.fill: parent; onClicked: replyBox.visible = !replyBox.visible }
+                                }
+                                Text { Layout.alignment: Qt.AlignVCenter; text: modelData.create_time || ""; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeTiny }
+                            }
+                            // 回复列表
+                            Column {
+                                width: parent.width; spacing: 4
+                                Repeater {
+                                    model: modelData.replies || []
+                                    delegate: Column {
+                                        width: parent.width
+                                        Text {
+                                            width: parent.width; wrapMode: Text.Wrap
+                                            text: modelData.author + qsTr("：") + modelData.content
+                                            color: Theme.textSecondary; font.pixelSize: Theme.fontSizeTiny
+                                        }
+                                        Text { visible: !!modelData.create_time; text: modelData.create_time; color: Theme.textSecondary; font.pixelSize: 9 }
+                                    }
+                                }
+                            }
+                            // 回复输入框（点击「回复」展开）
+                            Rectangle {
+                                id: replyBox
+                                visible: false
+                                width: parent.width; height: 32
+                                color: Theme.background; radius: 6; border.color: Theme.border
+                                Row {
+                                    anchors.fill: parent; anchors.margins: 4; spacing: 4
+                                    TextInput {
+                                        id: replyInput
+                                        width: parent.width - 66
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        color: Theme.textPrimary; font.pixelSize: Theme.fontSizeTiny
+                                        clip: true
+                                        onEditingFinished: submitReply()
+                                        Keys.onReturnPressed: submitReply()
+                                    }
+                                    Rectangle {
+                                        width: 60; height: 24; radius: 5; color: Theme.primary
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        Text { anchors.centerIn: parent; text: qsTr("发送"); color: "#fff"; font.pixelSize: 11 }
+                                        MouseArea { anchors.fill: parent; onClicked: submitReply() }
+                                    }
+                                }
                             }
                         }
                     }
@@ -384,6 +481,159 @@ Item {
         return c
     }
 
+    // —— 写评价弹窗 ——
+    Popup {
+        id: reviewDialog
+        parent: Overlay.overlay
+        width: Math.min(root.width - 48, 400)
+        height: Math.min(root.height - 160, 560)
+        x: Math.round((root.width - width) / 2)
+        y: Math.round((root.height - height) / 2)
+        modal: true; focus: true
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        padding: 0
+
+        property var tagPool: ["充电快","车位多","位置方便","免费停车","设备老旧","排队严重","适合快充","晚上人少","服务好","价格实惠"]
+        property var choseTags: []
+
+        function toggleTag(t) {
+            var idx = choseTags.indexOf(t)
+            if (idx >= 0) choseTags.splice(idx, 1)
+            else choseTags.push(t)
+            choseTags = choseTags.slice()   // 触发依赖重算
+        }
+
+        contentItem: Rectangle {
+            id: reviewForm
+            color: Theme.card; radius: Theme.radius
+            clip: true
+            function submitReview() {
+                if (srOverall.value < 0.5) { root.showToast(qsTr("请先选择综合评分")); return }
+                var ok = ExploreData.addReview({
+                            station_id: root.stationId,
+                            nickname: root.myNickname || qsTr("我"),
+                            overall_score: srOverall.value,
+                            speed_score: srSpeed.value,
+                            device_score: srDevice.value,
+                            parking_score: srParking.value,
+                            hygiene_score: srHygiene.value,
+                            service_score: srService.value,
+                            tags: reviewDialog.choseTags.slice(), content: contentText.text
+                        })
+                reviewDialog.close()
+                root.showToast(ok ? qsTr("评价已发布") : qsTr("发布失败"))
+            }
+            function clearForm() {
+                srOverall.value = 0; srSpeed.value = 0; srDevice.value = 0
+                srParking.value = 0; srHygiene.value = 0; srService.value = 0
+                reviewDialog.choseTags = []; if (contentText) contentText.text = ""
+            }
+            Connections {
+                target: reviewDialog
+                function onOpened() { reviewForm.clearForm() }
+            }
+            // 标题栏
+            Rectangle {
+                anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
+                height: 52; color: Theme.background
+                Text {
+                    anchors.centerIn: parent
+                    text: qsTr("写评价"); font.pixelSize: Theme.fontSizeTitle; font.bold: true; color: Theme.textPrimary
+                }
+            }
+            // 表单滚动区
+            ScrollView {
+                id: reviewScroll
+                anchors.left: parent.left; anchors.right: parent.right
+                anchors.top: parent.top; anchors.topMargin: 52
+                anchors.bottom: parent.bottom; anchors.bottomMargin: 56
+                clip: true
+                Column {
+                    width: reviewScroll.width
+                    padding: 16; spacing: 10
+                    // 六个维度评分（每个 Row 单独闭合，避免嵌套触发布局 polish() 循环）
+                    Row { spacing: 16
+                        Text { text: qsTr("综合"); width: 40; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeSmall }
+                        StarRating { id: srOverall }
+                    }
+                    Row { spacing: 16
+                        Text { text: qsTr("速度"); width: 40; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeSmall }
+                        StarRating { id: srSpeed }
+                    }
+                    Row { spacing: 16
+                        Text { text: qsTr("设备"); width: 40; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeSmall }
+                        StarRating { id: srDevice }
+                    }
+                    Row { spacing: 16
+                        Text { text: qsTr("停车"); width: 40; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeSmall }
+                        StarRating { id: srParking }
+                    }
+                    Row { spacing: 16
+                        Text { text: qsTr("卫生"); width: 40; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeSmall }
+                        StarRating { id: srHygiene }
+                    }
+                    Row { spacing: 16
+                        Text { text: qsTr("服务"); width: 40; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeSmall }
+                        StarRating { id: srService }
+                    }
+                    // 标签
+                    Text { text: qsTr("标签（可多选）"); color: Theme.textSecondary; font.pixelSize: Theme.fontSizeTiny }
+                    Flow {
+                        width: parent.width; spacing: 8
+                        Repeater {
+                            model: reviewDialog.tagPool
+                            delegate: Rectangle {
+                                property bool on: reviewDialog.choseTags.indexOf(modelData) >= 0
+                                width: tagTxt.implicitWidth + 18; height: 26; radius: 13
+                                color: on ? Theme.primary + "22" : Theme.card
+                                border.color: on ? Theme.primary : Theme.border; border.width: 1
+                                Text {
+                                    id: tagTxt; anchors.centerIn: parent
+                                    text: modelData; color: on ? Theme.primary : Theme.textSecondary
+                                    font.pixelSize: Theme.fontSizeTiny
+                                }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    onClicked: reviewDialog.toggleTag(modelData)
+                                }
+                            }
+                        }
+                    }
+                    // 内容
+                    Text { text: qsTr("文字评价"); color: Theme.textSecondary; font.pixelSize: Theme.fontSizeTiny }
+                    Rectangle {
+                        width: parent.width; height: 96
+                        color: Theme.background; radius: Theme.radiusSmall; border.color: Theme.border
+                        TextArea {
+                            id: contentText
+                            width: parent.width; height: parent.height; padding: 10
+                            placeholderText: qsTr("说说你的充电体验……")
+                            color: Theme.textPrimary; wrapMode: TextEdit.Wrap
+                            font.pixelSize: Theme.fontSizeSmall
+                        }
+                    }
+                }
+            }
+            // 底部按钮行
+            Row {
+                anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
+                height: 56
+                Rectangle {
+                    width: parent.width/2; height: parent.height
+                    color: "transparent"
+                    Text { anchors.centerIn: parent; text: qsTr("取消"); color: Theme.textSecondary; font.pixelSize: Theme.fontSizeBase }
+                    MouseArea { anchors.fill: parent; onClicked: reviewDialog.close() }
+                }
+                Rectangle {
+                    width: parent.width/2; height: parent.height
+                    color: Theme.primary
+                    Text { anchors.centerIn: parent; text: qsTr("发布"); color: "#ffffff"; font.bold: true; font.pixelSize: Theme.fontSizeBase }
+                    MouseArea { anchors.fill: parent; onClicked: reviewForm.submitReview() }
+                }
+            }
+        }
+    }
+
     // —— 复用小组件 ——
     component Chip: Rectangle {
         property string text
@@ -406,5 +656,16 @@ Item {
         spacing: 6
         Text { text: parent.k + "："; color: Theme.textSecondary; font.pixelSize: Theme.fontSizeTiny }
         Text { text: parent.v; color: parent.c; font.pixelSize: Theme.fontSizeTiny; font.bold: (parent.c !== Theme.textPrimary) }
+    }
+    component StarRating: Row {
+        id: sr
+        property real value: 0
+        spacing: 2
+        // 内联组件内禁用 Repeater/delegate（运行时解析报错），故显式铺 5 颗星
+        Text { font.pixelSize: 24; text: sr.value >= 1 ? "★" : "☆"; color: sr.value >= 1 ? "#F59E0B" : Theme.border; MouseArea { anchors.fill: parent; onClicked: sr.value = 1 } }
+        Text { font.pixelSize: 24; text: sr.value >= 2 ? "★" : "☆"; color: sr.value >= 2 ? "#F59E0B" : Theme.border; MouseArea { anchors.fill: parent; onClicked: sr.value = 2 } }
+        Text { font.pixelSize: 24; text: sr.value >= 3 ? "★" : "☆"; color: sr.value >= 3 ? "#F59E0B" : Theme.border; MouseArea { anchors.fill: parent; onClicked: sr.value = 3 } }
+        Text { font.pixelSize: 24; text: sr.value >= 4 ? "★" : "☆"; color: sr.value >= 4 ? "#F59E0B" : Theme.border; MouseArea { anchors.fill: parent; onClicked: sr.value = 4 } }
+        Text { font.pixelSize: 24; text: sr.value >= 5 ? "★" : "☆"; color: sr.value >= 5 ? "#F59E0B" : Theme.border; MouseArea { anchors.fill: parent; onClicked: sr.value = 5 } }
     }
 }

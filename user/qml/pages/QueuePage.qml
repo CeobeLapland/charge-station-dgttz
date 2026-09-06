@@ -27,13 +27,12 @@ Item {
         }
     }
 
-    // 轮到你 → 跳扫码
+    // 轮到你 → 跳「已预约」中间页（让用户自行决定何时去扫码，而非被直接拉进扫码页）
     Connections {
         target: ChargingFlow
         function onReservationReady(message) {
             stackView.pop()
-            stackView.push("qrc:/UserClient/qml/pages/ScanPage.qml",
-                           { stationId: Number(ChargingFlow.flow.station_id) })
+            stackView.push("qrc:/UserClient/qml/pages/ReservedPage.qml")
             toast.text = message
         }
     }
@@ -68,10 +67,10 @@ Item {
                     Column {
                         id: meCol
                         width: parent.width; spacing: 6
-                        Row {
+                        RowLayout {
                             width: parent.width
                             Text { text: qsTr("我的排队"); font.bold: true; font.pixelSize: Theme.fontSizeTitle; color: Theme.primary }
-                            Item { Layout.fillWidth: true; width: 1; height: 1 }
+                            Item { Layout.fillWidth: true; height: 1 }
                             Row { spacing: 2
                                 Text { text: qsTr("序号 "); color: Theme.textSecondary; font.pixelSize: Theme.fontSizeSmall }
                                 Text { text: String(ChargingFlow.flow.queue_no || "—")
@@ -91,11 +90,11 @@ Item {
                     visible: modelData.kind === "citem"
                     width: parent.width
                     height: citemRow.implicitHeight
-                    Row {
+                    RowLayout {
                         id: citemRow
                         width: parent.width
                         Text { text: modelData.left; font.bold: true; font.pixelSize: Theme.fontSizeSmall; color: Theme.textPrimary }
-                        Item { Layout.fillWidth: true; width: 1; height: 1 }
+                        Item { Layout.fillWidth: true; height: 1 }
                         Chip { text: modelData.right }
                     }
                 }

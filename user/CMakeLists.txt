@@ -64,6 +64,7 @@ qt_add_executable(charge_user_client
     qml/pages/NavRoutePage.qml
     qml/pages/ReservePage.qml
     qml/pages/QueuePage.qml
+    qml/pages/ReservedPage.qml
     qml/pages/ChargingPage.qml
     qml/pages/SettlePage.qml
     qml/components/BottomNav.qml
@@ -104,6 +105,7 @@ qt_add_qml_module(charge_user_client
         qml/pages/NavRoutePage.qml
         qml/pages/ReservePage.qml
         qml/pages/QueuePage.qml
+        qml/pages/ReservedPage.qml
         qml/pages/ChargingPage.qml
         qml/pages/SettlePage.qml
         qml/components/BottomNav.qml

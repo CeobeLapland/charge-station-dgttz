@@ -83,6 +83,7 @@ private:
     void mockAssignCharger(const QVariantMap& c); // 选定空闲桩并回填 charger_id/code，进入 scan_pending
     // —— mock 服务端：预约扫码截止（push.order_timeout）——
     void mockStartScanDeadline();
+    void mockScanTick();              // 扫码倒计时秒针（供已预约页/首页展示剩余秒）
     void mockScanTimeout();
     // —— mock 服务端：充电进度（push.order_progress / charging_measure）——
     void mockStartCharging();
@@ -111,6 +112,7 @@ private:
 
     QTimer m_queueTimer;         // 队列轮候推进
     QTimer m_scanTimer;          // 扫码截止
+    QTimer m_scanTickTimer;      // 扫码倒计时秒针（展示用）
     QTimer m_progressTimer;      // 充电进度
     QTimer m_occupyTimer;        // 占位计时
 };
