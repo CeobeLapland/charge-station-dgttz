@@ -8,11 +8,14 @@
 
 // —— 违约 / 流程阈值（spec-充电全流程 第4节建议初值，示例阶段可加速演示）——
 namespace {
-constexpr int    kScanWindowSec = 60;        // 扫码保留窗口（示例加快，真实建议 10 分钟）
+constexpr int    kScanWindowSec = 300;        // 扫码保留窗口（示例加快，真实建议 10 分钟）
 constexpr int    kQueueAdvanceSec = 4;       // 排队轮到推进间隔（演示用，真实由服务端安排）
-constexpr int    kOccupyGraceSec = 10;       // 占位宽限（示例加速，真实建议 10 分钟）
+constexpr int    kOccupyGraceSec = 120;       // 占位宽限（示例加速，真实建议 10 分钟）
 constexpr qreal  kNoShowPenalty = 5.0;       // no_show 违约金（元）
 constexpr int    kNoShowCreditLoss = 5;      // no_show 信用分扣减
+constexpr int    kCancelFreeSec = 20;        // 主动取消免费窗口（占已匹配的保留窗口，剩余>此值免费）
+constexpr qreal  kCancelLatePenalty = 5.0;   // 临近扫码截止取消违约金（元）
+constexpr int    kCancelLateCreditLoss = 2;  // 临近取消信用扣减
 constexpr double kStartSocDefault = 20.0;    // 起始电量（示例无车辆实时电量，用默认值）
 } // namespace
 
@@ -20,6 +23,7 @@ ChargingFlow::ChargingFlow(QObject* parent)
     : QObject(parent) {
     connect(&m_queueTimer, &QTimer::timeout, this, &ChargingFlow::mockAdvanceQueue);
     connect(&m_scanTimer, &QTimer::timeout, this, &ChargingFlow::mockScanTimeout);
+    connect(&m_scanTickTimer, &QTimer::timeout, this, &ChargingFlow::mockScanTick);
     connect(&m_progressTimer, &QTimer::timeout, this, &ChargingFlow::mockProgressTick);
     connect(&m_occupyTimer, &QTimer::timeout, this, &ChargingFlow::mockOccupyTick);
 
@@ -192,7 +196,17 @@ void ChargingFlow::mockAssignCharger(const QVariantMap& c) {
 
 // —— mock 服务端：扫码截止计时 ——
 void ChargingFlow::mockStartScanDeadline() {
+    m_flow.insert(QStringLiteral("scan_remaining_sec"), kScanWindowSec);
     m_scanTimer.start(kScanWindowSec * 1000);
+    m_scanTickTimer.start(1000);
+}
+
+void ChargingFlow::mockScanTick() {
+    const int left = m_flow.value(QStringLiteral("scan_remaining_sec")).toInt() - 1;
+    if (left <= 0)
+        return; // 走到 0 由 mockScanTimeout 统一收尾
+    m_flow.insert(QStringLiteral("scan_remaining_sec"), left);
+    emit stateChanged();
 }
 
 void ChargingFlow::mockScanTimeout() {
@@ -206,15 +220,26 @@ void ChargingFlow::mockScanTimeout() {
 void ChargingFlow::cancel() {
     m_queueTimer.stop();
     m_scanTimer.stop();
+    m_scanTickTimer.stop();
     QString reason;
     if (m_phase == QStringLiteral("queued")) {
         reason = QStringLiteral("已退出排队");
     } else if (m_phase == QStringLiteral("scan_pending")) {
-        reason = QStringLiteral("已取消预约，桩已释放");
+        const int remaining = m_flow.value(QStringLiteral("scan_remaining_sec")).toInt();
         m_flow.insert(QStringLiteral("cancel_reason"), QStringLiteral("user_cancel"));
+        // 主动取消：距扫码截止尚有较多时间免费；临近截止再取消需付违约金 + 扣信用
+        if (remaining <= kCancelFreeSec) {
+            mockApplyPenalty(kCancelLatePenalty, kCancelLateCreditLoss,
+                             QStringLiteral("user_cancel_late"));
+            reason = QStringLiteral("临近扫码截止取消，产生违约金 ¥%1、信用分 -%2")
+                         .arg(kCancelLatePenalty, 0, 'f', 2)
+                         .arg(kCancelLateCreditLoss);
+        } else {
+            reason = QStringLiteral("已取消预约，桩已释放（免费）");
+        }
     }
     setPhase(QStringLiteral("cancelled"));
-    emit abnormal(QStringLiteral("预约已取消"), reason);
+    emit abnormal(QStringLiteral("已取消预约"), reason);
 }
 
 // —— 扫码确认：校验一致性后 order.start ——
@@ -237,6 +262,7 @@ bool ChargingFlow::confirmScan(int stationId, const QString& code) {
 // —— mock 服务端：order.start ——
 void ChargingFlow::mockStartCharging() {
     m_scanTimer.stop();
+    m_scanTickTimer.stop();
     m_flow.insert(QStringLiteral("soc"), kStartSocDefault);
     m_flow.insert(QStringLiteral("power_kw"), 0.0);
     m_flow.insert(QStringLiteral("energy_kwh"), 0.0);
@@ -401,40 +427,62 @@ void ChargingFlow::simulateScanTimeout() {
 void ChargingFlow::reset() {
     m_queueTimer.stop();
     m_scanTimer.stop();
+    m_scanTickTimer.stop();
     m_progressTimer.stop();
     m_occupyTimer.stop();
     m_flow.insert(QStringLiteral("occupied"), false);
     setPhase(QStringLiteral("idle"));
 }
 
-// 当前进行中订单（供首页「正在进行」栏合并展示）。
-// 生命周期：开始充电 → charging；达目标/提前结束 → settle（待结算）→ 结算成功（done）后消失。
+// 当前进行中行程（供首页「进行中」栏合并展示）。
+// 覆盖 all 活跃态：queued(排队中) / scan_pending(已预约待扫码) / charging(充电中) / settle(待结算)。
+// 让用户从首页任一返回入口都能回到对应页；充电/结算分支沿用原有展示键。
 // 键对齐 UserData 的 charging_order 展示字段（station_name/charger_code/type/soc/unit_price 等）。
 QVariantMap ChargingFlow::currentOrder() const {
-    if (m_phase != QStringLiteral("charging") && m_phase != QStringLiteral("settle"))
+    if (m_phase != QStringLiteral("queued")
+        && m_phase != QStringLiteral("scan_pending")
+        && m_phase != QStringLiteral("charging")
+        && m_phase != QStringLiteral("settle"))
         return {};
-    const bool charging = (m_phase == QStringLiteral("charging"));
+
     QVariantMap o;
     o.insert(QStringLiteral("live"), true);                                            // 标识：来自实时流程
     o.insert(QStringLiteral("id"), -m_flow.value(QStringLiteral("order_id")).toInt()); // 负号避开种子订单 id
-    o.insert(QStringLiteral("status"), charging ? QStringLiteral("charging")
-                                               : QStringLiteral("pending_settle"));
     o.insert(QStringLiteral("station_id"), m_flow.value(QStringLiteral("station_id")));
     o.insert(QStringLiteral("station_name"), m_flow.value(QStringLiteral("station_name")));
     o.insert(QStringLiteral("station_address"), m_flow.value(QStringLiteral("station_address")));
-    o.insert(QStringLiteral("charger_code"), m_flow.value(QStringLiteral("charger_code")));
-    o.insert(QStringLiteral("charger_type"), m_flow.value(QStringLiteral("charger_type")));
-    o.insert(QStringLiteral("start_soc"), m_flow.value(QStringLiteral("start_soc")));
-    o.insert(QStringLiteral("target_soc"), m_flow.value(QStringLiteral("target_soc")));
-    o.insert(QStringLiteral("end_soc"), m_flow.value(QStringLiteral("end_soc")));
-    o.insert(QStringLiteral("soc"), charging ? m_flow.value(QStringLiteral("soc"))
-                                             : m_flow.value(QStringLiteral("end_soc")));
     o.insert(QStringLiteral("vehicle_name"), m_flow.value(QStringLiteral("vehicle_name")));
     o.insert(QStringLiteral("unit_price"), m_flow.value(QStringLiteral("unit_price")));
     o.insert(QStringLiteral("reserve_type"), m_flow.value(QStringLiteral("reserve_type")));
     o.insert(QStringLiteral("start_time"), m_flow.value(QStringLiteral("reserved_time")));
-    o.insert(QStringLiteral("energy_kwh"), m_flow.value(QStringLiteral("energy_kwh")));
-    o.insert(QStringLiteral("cost"), m_flow.value(QStringLiteral("cost")));
+
+    if (m_phase == QStringLiteral("queued")) {
+        o.insert(QStringLiteral("status"), QStringLiteral("queued"));
+        o.insert(QStringLiteral("queue_no"), m_flow.value(QStringLiteral("queue_no")));
+        o.insert(QStringLiteral("estimate_wait_min"), m_flow.value(QStringLiteral("estimate_wait_min")));
+    } else if (m_phase == QStringLiteral("scan_pending")) {
+        o.insert(QStringLiteral("status"), QStringLiteral("reserved"));
+        o.insert(QStringLiteral("charger_code"), m_flow.value(QStringLiteral("charger_code")));
+        o.insert(QStringLiteral("charger_type"), m_flow.value(QStringLiteral("charger_type")));
+        o.insert(QStringLiteral("scan_deadline"), m_flow.value(QStringLiteral("scan_deadline")));
+        o.insert(QStringLiteral("scan_remaining_sec"), m_flow.value(QStringLiteral("scan_remaining_sec")));
+        o.insert(QStringLiteral("start_soc"), m_flow.value(QStringLiteral("start_soc")));
+        o.insert(QStringLiteral("target_soc"), m_flow.value(QStringLiteral("target_soc")));
+        return o;
+    } else {
+        const bool charging = (m_phase == QStringLiteral("charging"));
+        o.insert(QStringLiteral("status"), charging ? QStringLiteral("charging")
+                                                    : QStringLiteral("pending_settle"));
+        o.insert(QStringLiteral("charger_code"), m_flow.value(QStringLiteral("charger_code")));
+        o.insert(QStringLiteral("charger_type"), m_flow.value(QStringLiteral("charger_type")));
+        o.insert(QStringLiteral("start_soc"), m_flow.value(QStringLiteral("start_soc")));
+        o.insert(QStringLiteral("target_soc"), m_flow.value(QStringLiteral("target_soc")));
+        o.insert(QStringLiteral("end_soc"), m_flow.value(QStringLiteral("end_soc")));
+        o.insert(QStringLiteral("soc"), charging ? m_flow.value(QStringLiteral("soc"))
+                                                 : m_flow.value(QStringLiteral("end_soc")));
+        o.insert(QStringLiteral("energy_kwh"), m_flow.value(QStringLiteral("energy_kwh")));
+        o.insert(QStringLiteral("cost"), m_flow.value(QStringLiteral("cost")));
+    }
     return o;
 }
 

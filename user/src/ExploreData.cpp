@@ -1,10 +1,13 @@
 #include "ExploreData.h"
 
+#include <QDateTime>
 #include <QHash>
 #include <QString>
 #include <QVariant>
 #include <QVariantList>
 #include <QVariantMap>
+
+#include <algorithm>
 
 namespace {
 
@@ -556,6 +559,69 @@ QVariantList ExploreData::stations() const {
     return out;
 }
 
+// ———————————————————————————————————————————————
+// 评论（review）运行时可变仓库：种子 + 用户新发，支持发/点赞/回复
+// ———————————————————————————————————————————————
+struct ReviewRec {
+    int id;
+    int stationId;
+    QString stationName;
+    QString content;
+    QString createTime;
+    double overall;
+    int useful;
+    bool mine;
+    bool likedByMe;
+    QVariantMap base;           // 原字段（nickname/content/tags/评分/...）
+    QList<QVariantMap> replies; // {id, author, content, create_time}
+};
+static QList<ReviewRec> g_reviews;
+static int g_nextReviewId = 1;
+static bool g_reviewsBuilt = false;
+
+static void ensureReviewsBuilt() {
+    if (g_reviewsBuilt) return;
+    g_reviewsBuilt = true;
+    static const auto seeds = buildSeeds();
+    for (const auto& s : seeds) {
+        for (const auto& rv : s.reviews) {
+            auto m = rv.toMap();
+            ReviewRec rec;
+            rec.id = g_nextReviewId++;
+            rec.stationId = s.id;
+            rec.stationName = s.name;
+            rec.content = m.value("content").toString();
+            rec.createTime = m.value("create_time").toString();
+            rec.overall = m.value("overall_score").toDouble();
+            rec.useful = m.value("useful_count").toInt();
+            rec.mine = false;
+            rec.likedByMe = false;
+            rec.base = m;
+            g_reviews.append(rec);
+        }
+    }
+}
+
+// 时间串规整：种子 16 位（无秒），补 ":00" 便于与用户新发同格式比较
+static QString reviewTimeNorm(const QString& t) {
+    return (t.length() == 16) ? t + QStringLiteral(":00") : t;
+}
+
+static QVariantMap reviewToMap(const ReviewRec& rec) {
+    QVariantMap m = rec.base;
+    m.insert("id", rec.id);
+    m.insert("station_id", rec.stationId);
+    m.insert("station_name", rec.stationName);
+    m.insert("is_mine", rec.mine);
+    m.insert("liked_by_me", rec.likedByMe);
+    m.insert("useful_count", rec.useful + (rec.likedByMe ? 1 : 0));
+    m.insert("create_time", rec.createTime);
+    QVariantList replies;
+    for (const auto& rp : rec.replies) replies.append(rp);
+    m.insert("replies", replies);
+    return m;
+}
+
 QVariantMap ExploreData::stationById(int stationId) const {
     for (const auto& s : stations()) {
         auto mm = s.toMap();
@@ -581,11 +647,89 @@ QVariantList ExploreData::priceRulesForStation(int stationId) const {
 }
 
 QVariantList ExploreData::reviewsForStation(int stationId) const {
-    static const auto seeds = buildSeeds();
-    for (const auto& s : seeds)
-        if (s.id == stationId)
-            return s.reviews;
-    return {};
+    ensureReviewsBuilt();
+    QVariantList out;
+    for (const auto& rec : g_reviews)
+        if (rec.stationId == stationId)
+            out.append(reviewToMap(rec));
+    return out;
+}
+
+QVariantList ExploreData::allReviews(int sortMode, bool mineOnly) const {
+    ensureReviewsBuilt();
+    QList<ReviewRec> list = g_reviews;
+    if (mineOnly) {
+        QList<ReviewRec> mine;
+        for (const auto& r : list) if (r.mine) mine.append(r);
+        list = mine;
+    }
+    if (sortMode == 1) {
+        std::sort(list.begin(), list.end(), [](const ReviewRec& a, const ReviewRec& b) {
+            int au = a.useful + (a.likedByMe ? 1 : 0);
+            int bu = b.useful + (b.likedByMe ? 1 : 0);
+            return au > bu;
+        });
+    } else if (sortMode == 2) {
+        std::sort(list.begin(), list.end(), [](const ReviewRec& a, const ReviewRec& b) {
+            return a.overall > b.overall;
+        });
+    } else {
+        std::sort(list.begin(), list.end(), [](const ReviewRec& a, const ReviewRec& b) {
+            return reviewTimeNorm(a.createTime) > reviewTimeNorm(b.createTime);
+        });
+    }
+    QVariantList out;
+    for (const auto& r : list) out.append(reviewToMap(r));
+    return out;
+}
+
+bool ExploreData::addReview(const QVariantMap& r) {
+    ensureReviewsBuilt();
+    int stationId = r.value("station_id").toInt();
+    if (stationId <= 0) return false;
+    ReviewRec rec;
+    rec.id = g_nextReviewId++;
+    rec.stationId = stationId;
+    rec.stationName = stationById(stationId).value("name").toString();
+    rec.content = r.value("content").toString();
+    rec.createTime = QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"));
+    rec.overall = r.value("overall_score").toDouble();
+    rec.useful = 0;
+    rec.mine = true;
+    rec.likedByMe = false;
+    rec.base = r;
+    g_reviews.append(rec);
+    emit reviewsChanged();
+    return true;
+}
+
+int ExploreData::toggleUseful(int reviewId) {
+    ensureReviewsBuilt();
+    for (auto& rec : g_reviews) {
+        if (rec.id == reviewId) {
+            rec.likedByMe = !rec.likedByMe;
+            emit reviewsChanged();
+            return rec.useful + (rec.likedByMe ? 1 : 0);
+        }
+    }
+    return -1;
+}
+
+bool ExploreData::addReply(int reviewId, const QString& author, const QString& content) {
+    ensureReviewsBuilt();
+    for (auto& rec : g_reviews) {
+        if (rec.id == reviewId) {
+            rec.replies.append(S({
+                {"id", g_nextReviewId++},
+                {"author", author},
+                {"content", content},
+                {"create_time", QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"))}
+            }));
+            emit reviewsChanged();
+            return true;
+        }
+    }
+    return false;
 }
 
 QVariantMap ExploreData::weatherForArea(const QString& area) const {

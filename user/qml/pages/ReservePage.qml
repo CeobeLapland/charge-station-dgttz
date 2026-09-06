@@ -62,8 +62,7 @@ Item {
     }
     function navAfterSubmit() {
         if (ChargingFlow.phase === "scan_pending")
-            stackView.push("qrc:/UserClient/qml/pages/ScanPage.qml",
-                           { stationId: root.stationId })
+            stackView.push("qrc:/UserClient/qml/pages/ReservedPage.qml")
         else if (ChargingFlow.phase === "queued")
             stackView.push("qrc:/UserClient/qml/pages/QueuePage.qml")
         else
