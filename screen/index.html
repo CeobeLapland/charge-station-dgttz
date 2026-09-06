@@ -1,83 +1,49 @@
 <!doctype html>
 <html lang="zh-CN">
-  <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>电动汽车充电运营平台</title>
-    <link rel="stylesheet" href="css/dashboard.css">
-  </head>
-  <body>
-    <div class="app-shell">
-      <header class="topbar">
-        <a class="brand" href="#overview" aria-label="返回运营概览">
-          <span class="brand-mark" aria-hidden="true"><span></span></span>
-          <span><strong>充电运营平台</strong></span>
-        </a>
-        <nav class="main-nav" aria-label="大屏页面导航">
-          <button class="nav-item active" type="button" data-page-target="overview">运营概览</button>
-          <button class="nav-item" type="button" data-page-target="stations">站点监控</button>
-          <button class="nav-item" type="button" data-page-target="analytics">数据分析</button>
-          <button class="nav-item" type="button" data-page-target="alarms">告警中心</button>
-        </nav>
-        <div class="status-cluster">
-          <span id="connection-status" class="connection connection-offline">未连接</span>
-          <time id="clock" aria-label="当前时间"></time>
-        </div>
-      </header>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>电动汽车充电运营平台</title><link rel="stylesheet" href="css/dashboard.css"></head>
+<body>
+<div class="app-shell">
+  <header class="topbar">
+    <a class="brand" href="#overview" aria-label="返回运营概览"><span class="brand-mark" aria-hidden="true"><span></span></span><strong>充电运营平台</strong></a>
+    <nav class="main-nav" aria-label="大屏页面导航">
+      <button class="nav-item active" type="button" data-page-target="overview">运营概览</button><button class="nav-item" type="button" data-page-target="stations">电站数据</button><button class="nav-item" type="button" data-page-target="analytics">数据分析</button><button class="nav-item" type="button" data-page-target="events">平台事件</button>
+    </nav>
+    <div class="status-cluster"><span id="connection-status" class="connection connection-offline">未连接</span><time id="clock" aria-label="当前时间"></time></div>
+  </header>
+  <main class="page-container">
+    <section class="app-page active" data-page="overview" aria-labelledby="overview-title">
+      <div class="page-heading"><h1 id="overview-title">今日运营</h1><span id="last-updated" class="updated-time"><i aria-hidden="true"></i>尚未更新</span></div>
+      <section class="metric-grid" aria-label="核心运营指标">
+        <article class="metric-card"><span class="metric-label">今日营收</span><div><strong id="today-revenue" class="metric-value">--</strong><span class="metric-unit">元</span></div><small id="revenue-trend" class="metric-trend">等待数据</small></article>
+        <article class="metric-card"><span class="metric-label">今日订单</span><div><strong id="today-orders" class="metric-value">--</strong><span class="metric-unit">笔</span></div><small id="orders-trend" class="metric-trend">等待数据</small></article>
+        <article class="metric-card"><span class="metric-label">当前充电</span><div><strong id="charging-count" class="metric-value">--</strong><span class="metric-unit">台</span></div><small class="metric-trend">充电中的设备</small></article>
+        <article class="metric-card"><span class="metric-label">充电桩在线率</span><div><strong id="online-rate" class="metric-value">--</strong><span class="metric-unit">%</span></div><small class="metric-trend">在线设备占比</small></article>
+      </section>
+      <article class="panel realtime-panel"><div class="panel-heading"><h2>实时功率</h2></div><div class="realtime-summary"><div><span>当前总功率</span><strong id="current-power">--</strong><small>kW</small></div><div><span>正在使用的电站</span><strong id="active-station-count">--</strong><small>座</small></div></div><div id="load-chart" class="chart chart-overview" role="img" aria-label="近期功率和使用中电站数量变化"></div></article>
+    </section>
 
-      <main class="page-container">
-        <section class="app-page active" data-page="overview" aria-labelledby="overview-title">
-          <div class="page-heading">
-            <div><h1 id="overview-title">今日运营情况</h1></div>
-            <span id="last-updated" class="updated-time"><i aria-hidden="true"></i>尚未更新</span>
-          </div>
-          <section class="metric-grid" aria-label="核心运营指标">
-            <article class="metric-card metric-blue"><span class="metric-label">今日营收</span><div><strong id="today-revenue" class="metric-value">--</strong><span class="metric-unit">元</span></div><small id="revenue-trend" class="metric-trend">等待数据</small></article>
-            <article class="metric-card metric-indigo"><span class="metric-label">今日订单</span><div><strong id="today-orders" class="metric-value">--</strong><span class="metric-unit">笔</span></div><small id="orders-trend" class="metric-trend">等待数据</small></article>
-            <article class="metric-card metric-orange"><span class="metric-label">当前充电</span><div><strong id="charging-count" class="metric-value">--</strong><span class="metric-unit">台</span></div><small class="metric-trend">根据设备状态实时更新</small></article>
-            <article class="metric-card metric-green"><span class="metric-label">在线充电桩</span><div><strong id="online-rate" class="metric-value">--</strong><span class="metric-unit">%</span></div><small class="metric-trend">在线桩 / 总桩</small></article>
-          </section>
-          <section class="content-grid overview-grid">
-            <article class="panel panel-large"><div class="panel-heading"><div><h2>实时功率负荷</h2></div></div><div id="load-chart" class="chart chart-large" role="img" aria-label="实时和预测功率负荷曲线"></div></article>
-            <article class="panel"><div class="panel-heading"><div><h2>最新平台事件</h2></div></div><div id="event-stream" class="event-stream" aria-live="polite"></div></article>
-          </section>
-        </section>
+    <section class="app-page" data-page="stations" aria-labelledby="stations-title" hidden>
+      <div class="page-heading station-heading"><h1 id="stations-title">电站数据</h1><label class="station-search"><span>搜索</span><input id="station-search" type="search" placeholder="输入电站名称" autocomplete="off"></label></div>
+      <section class="station-workspace">
+        <aside class="station-sidebar" aria-label="电站列表"><div class="section-title"><span>全部电站</span><small id="station-result-count">0 座</small></div><div id="station-list" class="station-list"></div></aside>
+        <article class="panel station-detail-panel"><div class="panel-heading"><div><h2 id="station-detail-name">请选择电站</h2><span id="station-detail-meta" class="heading-meta"></span></div></div><div class="station-kpis"><div><span>当前功率</span><strong id="station-power">--</strong><small>kW</small></div><div><span>当前负载</span><strong id="station-load">--</strong><small>%</small></div><div><span>空闲充电桩</span><strong id="station-idle">--</strong><small>台</small></div><div><span>今日营收</span><strong id="station-revenue">--</strong><small>元</small></div></div><div id="station-power-chart" class="chart station-power-chart" role="img" aria-label="所选电站近期功率变化"></div></article>
+      </section>
+      <section class="content-grid two-column-grid station-secondary"><article class="panel"><div class="panel-heading"><h2>电站分布</h2></div><div id="station-chart" class="chart" role="img" aria-label="充电站分布散点图"></div></article><article class="panel"><div class="panel-heading"><h2>电站利用率</h2></div><div id="utilization-chart" class="chart" role="img" aria-label="充电站利用率排名"></div></article></section>
+    </section>
 
-        <section class="app-page" data-page="stations" aria-labelledby="stations-title" hidden>
-          <div class="page-heading"><div><h1 id="stations-title">充电站运行状态</h1></div></div>
-          <section class="content-grid two-column-grid">
-            <article class="panel panel-large"><div class="panel-heading"><div><h2>充电站分布</h2></div></div><div id="station-chart" class="chart chart-large" role="img" aria-label="充电站分布散点图"></div></article>
-            <article class="panel panel-large"><div class="panel-heading"><div><h2>站点利用率</h2></div></div><div id="utilization-chart" class="chart chart-large" role="img" aria-label="充电站利用率排名"></div></article>
-          </section>
-        </section>
+    <section class="app-page" data-page="analytics" aria-labelledby="analytics-title" hidden>
+      <div class="page-heading"><h1 id="analytics-title">数据分析</h1></div>
+      <section class="content-grid analytics-grid"><article class="panel"><div class="panel-heading"><h2>用户增长趋势</h2></div><div id="user-chart" class="chart" role="img" aria-label="用户增长趋势折线图"></div></article><article class="panel"><div class="panel-heading"><h2>峰平谷电量结构</h2></div><div id="energy-chart" class="chart" role="img" aria-label="峰平谷电量占比图"></div></article><article class="panel"><div class="panel-heading"><h2>电站今日营收对比</h2></div><div id="station-revenue-chart" class="chart" role="img" aria-label="各电站今日营收对比"></div></article><article class="panel"><div class="panel-heading"><h2>电站负载分布</h2></div><div id="load-distribution-chart" class="chart" role="img" aria-label="电站负载区间分布"></div></article></section>
+    </section>
 
-        <section class="app-page" data-page="analytics" aria-labelledby="analytics-title" hidden>
-          <div class="page-heading"><div><h1 id="analytics-title">业务趋势分析</h1></div></div>
-          <section class="content-grid two-column-grid">
-            <article class="panel panel-large"><div class="panel-heading"><div><h2>用户增长趋势</h2></div></div><div id="user-chart" class="chart chart-large" role="img" aria-label="用户增长趋势折线图"></div></article>
-            <article class="panel panel-large"><div class="panel-heading"><div><h2>峰谷电量分析</h2></div></div><div id="energy-chart" class="chart chart-large" role="img" aria-label="峰平谷电量占比图"></div></article>
-          </section>
-        </section>
-
-        <section class="app-page" data-page="alarms" aria-labelledby="alarms-title" hidden>
-          <div class="page-heading"><div><h1 id="alarms-title">实时设备告警</h1></div><span class="alarm-summary">当前告警 <strong id="alarm-count">0</strong> 条</span></div>
-          <article class="panel alarm-panel">
-            <div class="alarm-table-heading" aria-hidden="true"><span>告警内容</span><span>所属位置</span><span>级别</span><span>发生时间</span></div>
-            <div id="alarm-list" class="alarm-list" aria-live="polite"></div>
-          </article>
-        </section>
-      </main>
-    </div>
-
-    <div id="error-banner" class="error-banner" role="alert" hidden></div>
-    <!-- 正式离线交付前，将固定版本 ECharts 放入 vendor/ 并改为本地路径。 -->
-    <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
-    <script src="js/config.js"></script>
-    <script src="mock/snapshot.js"></script>
-    <script src="js/adapter.js"></script>
-    <script src="js/store.js"></script>
-    <script src="js/websocket-client.js"></script>
-    <script src="js/charts.js"></script>
-    <script src="js/app.js"></script>
-  </body>
+    <section class="app-page" data-page="events" aria-labelledby="events-title" hidden>
+      <div class="page-heading"><h1 id="events-title">平台事件</h1><span class="event-total">共 <strong id="event-count">0</strong> 条</span></div>
+      <div class="event-filters" role="group" aria-label="事件分类筛选"><button class="filter-button active" type="button" data-event-filter="all">全部</button><button class="filter-button" type="button" data-event-filter="system">系统事件</button><button class="filter-button" type="button" data-event-filter="user">用户事件</button><button class="filter-button" type="button" data-event-filter="hardware">硬件事件</button><button class="filter-button" type="button" data-event-filter="station">电站事件</button><button class="filter-button" type="button" data-event-filter="alarm">警告</button></div>
+      <article class="panel event-panel"><div class="event-table-heading"><span>时间</span><span>分类</span><span>事件内容</span><span>关联对象</span></div><div id="platform-event-list" class="platform-event-list" aria-live="polite"></div></article>
+    </section>
+  </main>
+</div>
+<div id="error-banner" class="error-banner" role="alert" hidden></div>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script><script src="js/config.js"></script><script src="mock/snapshot.js"></script><script src="js/adapter.js"></script><script src="js/store.js"></script><script src="js/websocket-client.js"></script><script src="js/charts.js"></script><script src="js/app.js"></script>
+</body>
 </html>
