@@ -100,6 +100,44 @@ Item {
         return "#ffffff"
     }
 
+    // —— 一键预约：就近空闲桩 / 智能推荐桩（示例逻辑，未来接入机器学习）——
+    function pickStation(useRec) {
+        // 先收集有空闲桩的电站
+        var idle = []
+        var fav
+        for (var i = 0; i < stationsAll.length; i++) {
+            var st = stationsAll[i]
+            if (Number(st.fast_idle || 0) + Number(st.slow_idle || 0) <= 0) continue
+            if (useRec && UserData.isFavorite(st.id)) { if (!fav) fav = st }
+            idle.push(st)
+        }
+        if (useRec && fav) return fav
+        // 其余按距离挑最近；推荐模式优先评分 >=4.5 的
+        var best = null, bestD = Infinity
+        var rated = null, ratedD = Infinity
+        for (var j = 0; j < idle.length; j++) {
+            var s = idle[j]
+            var d = haversine(myLoc.lng, myLoc.lat, Number(s.longitude), Number(s.latitude))
+            if (useRec && Number(s.rating || 0) >= 4.5 && d < ratedD) { rated = s; ratedD = d }
+            if (d < bestD) { best = s; bestD = d }
+        }
+        return (useRec && rated) ? rated : best
+    }
+    function quickReserve(useRec) {
+        if (!vehiclesData.length) { root.showToast(qsTr("请先到「我的」添加车辆")); return }
+        var st = root.pickStation(useRec)
+        if (!st) { root.showToast(qsTr("附近暂无空闲桩，稍后再试")); return }
+        var veh = vehiclesData[0]
+        ChargingFlow.startCharge(Number(st.id), "immediate", "",
+                                 Number(veh.id || 0), 80, "fast")
+        if (ChargingFlow.phase === "scan_pending")
+            root.stackView.push("qrc:/UserClient/qml/pages/ReservedPage.qml")
+        else if (ChargingFlow.phase === "queued")
+            root.stackView.push("qrc:/UserClient/qml/pages/QueuePage.qml")
+        else
+            root.showToast(qsTr("暂无可预约电站，请重试"))
+    }
+
     // ===================== 筛选 / 排序 =====================
     property int sortIdx: 0
     property int vehicleIdx: 0
@@ -559,7 +597,7 @@ Item {
                         width: (parent.width - parent.spacing) / 2
                         height: 34; anchors.verticalCenter: parent.verticalCenter
                         text: qsTr("🤖 智能推荐")
-                        onClicked: root.showToast(qsTr("智能推荐功能建设中（机器学习未接入）"))
+                        onClicked: root.quickReserve(true)
                         background: Rectangle { color: Theme.accent + "22"; radius: Theme.radiusSmall; border.color: Theme.accent; border.width: 1 }
                         contentItem: Text { text: parent.text; color: Theme.primary; font.pixelSize: Theme.fontSizeBase; font.bold: true; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
                     }
@@ -567,7 +605,7 @@ Item {
                         width: (parent.width - parent.spacing) / 2
                         height: 34; anchors.verticalCenter: parent.verticalCenter
                         text: qsTr("⚡ 现在就充")
-                        onClicked: root.showToast(qsTr("现在充功能建设中（机器学习未接入）"))
+                        onClicked: root.quickReserve(false)
                         background: Rectangle { color: Theme.primary; radius: Theme.radiusSmall }
                         contentItem: Text { text: parent.text; color: "#ffffff"; font.pixelSize: Theme.fontSizeBase; font.bold: true; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
                     }

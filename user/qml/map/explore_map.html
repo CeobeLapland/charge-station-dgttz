@@ -39,6 +39,10 @@
     content: ""; position: absolute; left: 50%; bottom: -4px; transform: translateX(-50%) rotate(45deg);
     width: 6px; height: 6px; background: #fff; border-right: 1px solid #d7e2f0; border-bottom: 1px solid #d7e2f0;
   }
+  /* 旅行规划高亮：金色描边 + 放大，区别于普通点 */
+  .stn-marker.planned { z-index: 9; filter: drop-shadow(0 2px 4px rgba(240,80,26,.45)); }
+  .stn-marker.planned .pin { box-shadow: inset 0 0 0 3px #ffd66b, 0 0 0 3px #ff9d3b; }
+  .stn-marker.planned .pin span { font-weight: 800; }
 </style>
 </head>
 <body>
@@ -265,6 +269,78 @@
 
   // 6) 显示/隐藏 marker 的最小 zoom（可配置，默认 11）
   function setMarkerMinZoom(z) { MARKER_MIN_ZOOM = Number(z) || 11; refreshMarkers(); }
+
+  // 7) 旅行规划：高亮途经电站（返回 ids 数组），并 fitBounds 到全路线范围
+  //    routePts: [[lng,lat], ...] 起点→终点（含各电站），用于确定视野范围
+  function setPlannedStops(ids, routePts) {
+    try {
+      // 清空旧高亮（恢复普通 marker 样式）
+      if (window.__plannedIds) {
+        window.__plannedIds.forEach(function (id) {
+          var rec = MARKERS[id];
+          if (rec && rec.el) rec.el.classList.remove('planned');
+        });
+      }
+      var list = Array.isArray(ids) ? ids : [];
+      window.__plannedIds = list;
+      var pts = Array.isArray(routePts) ? routePts : [];
+      var bounds = new maplibregl.LngLatBounds();
+      var any = false;
+      function addPt(p) {
+        try { bounds.extend([Number(p[0]), Number(p[1])]); any = true; } catch (e) {}
+      }
+      // 先加电站点
+      list.forEach(function (id) {
+        var s = STATIONS.filter(function (x) { return Number(x.id) === Number(id); })[0];
+        if (s) { addPt([s.longitude, s.latitude]); }
+      });
+      // 再加路线点（起终点/经停）
+      pts.forEach(addPt);
+      if (!any) return;
+      list.forEach(function (id) {
+        var rec = MARKERS[id];
+        if (rec && rec.el) rec.el.classList.add('planned');
+      });
+      // 确保高亮电站的 marker 已挂载（放宽 zoom 阈值后刷新）
+      if (list.length) MARKER_MIN_ZOOM = 0;
+      map.jumpTo({ center: bounds.getCenter(), zoom: Math.max(map.getZoom() || 11, 11) });
+      map.fitBounds(bounds, { padding: 60, maxZoom: 14, duration: 600 });
+      refreshMarkers();
+    } catch (e) {
+      showErr('高亮路线失败：' + (e.message || e));
+    }
+  }
+
+  // 8) 历史足迹：绘制黑色折线连接途经点（时间顺序）
+  //    points: [[lng,lat], ...]
+  function drawFootline(points) {
+    try {
+      var pts = Array.isArray(points) ? points : [];
+      if (!pts.length) { clearFootline(); return; }
+      var geojson = {
+        type: 'Feature',
+        properties: {},
+        geometry: { type: 'LineString', coordinates: pts }
+      };
+      if (map.getSource('footline')) {
+        map.getSource('footline').setData(geojson);
+      } else {
+        map.addSource('footline', { type: 'geojson', data: geojson });
+        map.addLayer({
+          id: 'footline-layer', type: 'line', source: 'footline',
+          layout: { 'line-cap': 'round', 'line-join': 'round' },
+          paint: { 'line-color': '#1f2937', 'line-width': 3, 'line-opacity': 0.85 }
+        });
+      }
+    } catch (e) { showErr('绘制足迹线失败：' + (e.message || e)); }
+  }
+
+  function clearFootline() {
+    try {
+      if (map.getLayer('footline-layer')) map.removeLayer('footline-layer');
+      if (map.getSource('footline')) map.removeSource('footline');
+    } catch (e) {}
+  }
 </script>
 </body>
 </html>

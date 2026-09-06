@@ -8,11 +8,14 @@
 
 // —— 违约 / 流程阈值（spec-充电全流程 第4节建议初值，示例阶段可加速演示）——
 namespace {
-constexpr int    kScanWindowSec = 60;        // 扫码保留窗口（示例加快，真实建议 10 分钟）
+constexpr int    kScanWindowSec = 300;        // 扫码保留窗口（示例加快，真实建议 10 分钟）
 constexpr int    kQueueAdvanceSec = 4;       // 排队轮到推进间隔（演示用，真实由服务端安排）
-constexpr int    kOccupyGraceSec = 10;       // 占位宽限（示例加速，真实建议 10 分钟）
+constexpr int    kOccupyGraceSec = 120;       // 占位宽限（示例加速，真实建议 10 分钟）
 constexpr qreal  kNoShowPenalty = 5.0;       // no_show 违约金（元）
 constexpr int    kNoShowCreditLoss = 5;      // no_show 信用分扣减
+constexpr int    kCancelFreeSec = 20;        // 主动取消免费窗口（占已匹配的保留窗口，剩余>此值免费）
+constexpr qreal  kCancelLatePenalty = 5.0;   // 临近扫码截止取消违约金（元）
+constexpr int    kCancelLateCreditLoss = 2;  // 临近取消信用扣减
 constexpr double kStartSocDefault = 20.0;    // 起始电量（示例无车辆实时电量，用默认值）
 } // namespace
 
@@ -222,11 +225,21 @@ void ChargingFlow::cancel() {
     if (m_phase == QStringLiteral("queued")) {
         reason = QStringLiteral("已退出排队");
     } else if (m_phase == QStringLiteral("scan_pending")) {
-        reason = QStringLiteral("已取消预约，桩已释放");
+        const int remaining = m_flow.value(QStringLiteral("scan_remaining_sec")).toInt();
         m_flow.insert(QStringLiteral("cancel_reason"), QStringLiteral("user_cancel"));
+        // 主动取消：距扫码截止尚有较多时间免费；临近截止再取消需付违约金 + 扣信用
+        if (remaining <= kCancelFreeSec) {
+            mockApplyPenalty(kCancelLatePenalty, kCancelLateCreditLoss,
+                             QStringLiteral("user_cancel_late"));
+            reason = QStringLiteral("临近扫码截止取消，产生违约金 ¥%1、信用分 -%2")
+                         .arg(kCancelLatePenalty, 0, 'f', 2)
+                         .arg(kCancelLateCreditLoss);
+        } else {
+            reason = QStringLiteral("已取消预约，桩已释放（免费）");
+        }
     }
     setPhase(QStringLiteral("cancelled"));
-    emit abnormal(QStringLiteral("预约已取消"), reason);
+    emit abnormal(QStringLiteral("已取消预约"), reason);
 }
 
 // —— 扫码确认：校验一致性后 order.start ——

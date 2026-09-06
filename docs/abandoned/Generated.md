@@ -1,4 +1,4 @@
-cmake --build build -j && ./build/charge_user_client
+cmake --build build -j 2 && ./build/charge_user_client
 
 
 

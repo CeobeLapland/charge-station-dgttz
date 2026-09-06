@@ -17,7 +17,7 @@ Item {
     // —— 主状态 ——
     property bool gridVisible: true
     property bool mapInteractive: false
-    property string activeSheet: ""      // "" | community | planner | power | cityPicker | stationDetail
+    property string activeSheet: ""      // "" | community | planner | footprint | cityPicker | stationDetail
     readonly property int sheetHeight: Math.round(root.height * 0.6)
     readonly property int stationHeight: Math.round(root.height * 0.7) // 详情稍高
     readonly property int cityPickerHeight: Math.round(root.height * 0.55)
@@ -27,7 +27,7 @@ Item {
         sheetTitles = {
             "community":     qsTr("社区"),
             "planner":       qsTr("旅行规划器"),
-            "power":         qsTr("电力世界"),
+            "footprint":     qsTr("历史足迹"),
             "cityPicker":    qsTr("选择城市"),
             "stationDetail": qsTr("电站详情")
         }
@@ -133,7 +133,7 @@ Item {
         if (a === 0) enterMap()
         else if (a === 1) openSheet("community")
         else if (a === 2) openSheet("planner")
-        else openSheet("power")
+        else openSheet("footprint")
     }
 
     // —— 充电站数据 + 筛选注入 ——
@@ -370,7 +370,7 @@ Item {
             GridTile { label: qsTr("进入地图");   icon: "\u{1F5FA}\u{FE0F}"; action: 0 }
             GridTile { label: qsTr("社区");       icon: "\u{1F465}";        action: 1 }
             GridTile { label: qsTr("旅行规划器"); icon: "\u{1F9F3}";        action: 2 }
-            GridTile { label: qsTr("电力世界");   icon: "\u{26A1}";         action: 3 }
+            GridTile { label: qsTr("历史足迹"); icon: "\u{1F4CD}"; action: 3 }
         }
     }
 
@@ -381,8 +381,10 @@ Item {
         id: sheetLoader
         width: parent.width
         height: {
-            // 电站详情顶格 = 全屏占满，去除顶部空白
+            // 电站详情/社区/旅行规划/历史足迹 顶格 = 全屏占满，去除顶部空白
             if (activeSheet === "stationDetail") return root.height
+            if (activeSheet === "planner")       return root.height
+            if (activeSheet === "footprint")     return root.height
             if (activeSheet === "cityPicker")    return cityPickerHeight
             if (activeSheet === "community")     return root.height
             return sheetHeight
@@ -393,11 +395,33 @@ Item {
             if (activeSheet === "cityPicker")    return cityPickerSheet
             if (activeSheet === "stationDetail") return stationDetailSheet
             if (activeSheet === "community")     return communitySheet
+            if (activeSheet === "planner")       return plannerSheet
+            if (activeSheet === "footprint")     return footprintSheet
             return placeholderSheet
         }
         Behavior on y {
             enabled: activeSheet !== "stationDetail"
             NumberAnimation { duration: 260; easing.type: Easing.OutCubic }
+        }
+    }
+
+    // 旅行规划器：独立全屏页，加载外部文件，关闭时回落主界面
+    Component {
+        id: plannerSheet
+        Loader {
+            anchors.fill: parent
+            source: "qrc:/UserClient/qml/pages/TripPlannerSheet.qml"
+            onLoaded: item.requestClose.connect(function () { root.closeSheet() })
+        }
+    }
+
+    // 历史足迹：独立全屏页（时间筛选 + 列表 + 地图连线高亮）
+    Component {
+        id: footprintSheet
+        Loader {
+            anchors.fill: parent
+            source: "qrc:/UserClient/qml/pages/TripFootprintSheet.qml"
+            onLoaded: item.requestClose.connect(function () { root.closeSheet() })
         }
     }
 
