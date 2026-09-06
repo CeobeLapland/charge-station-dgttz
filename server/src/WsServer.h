@@ -112,6 +112,24 @@ private:
     QJsonObject handleOrderList(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
     QJsonObject handleOrderDetail(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
 
+    // ---- 我的车辆 vehicle.* / 工单 work_order.* / 预约 reservation.* ----
+    QJsonObject handleUserUpdateProfile(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+    QJsonObject handleVehicleAdd(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+    QJsonObject handleVehicleList(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+    QJsonObject handleVehicleUpdate(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+    QJsonObject handleVehicleDelete(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+    QJsonObject handleWorkOrderCreate(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+    QJsonObject handleWorkOrderList(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+    QJsonObject handleReservationJoin(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+    QJsonObject handleReservationCancel(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+    QJsonObject handleReservationList(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+
+    // 一根桩空出来时叫号: 匹配该站队首并推送 push.reservation_notify
+    void notifyQueueOnChargerFree(int stationId);
+
+    // 启动时把仍在 charging 的订单交还给仿真线程(服务端重启恢复)
+    void resumeChargingOrders();
+
     // ---- 数据大屏 screen.* / ml.* ----
     QJsonObject handleScreenSnapshot(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
     QJsonObject handleMlForecast(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);

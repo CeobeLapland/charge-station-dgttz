@@ -79,6 +79,19 @@ std::optional<OrderView> findOrder(int userId, int orderId);
 // 订单时间轴。
 QList<TimelineRow> timelineOf(int orderId);
 
+// ---- 预约 / 智能排队 ----
+struct ReservationView {
+    int     id = 0, userId = 0, stationId = 0, chargerId = 0, queueNo = 0;
+    QString stationName, chargerCode, reserveTime, estimateStartTime, status;
+    int     aheadCount = 0;    // 前面还有几个人在等(仅 waiting 时有意义)
+};
+
+// ---- 服务端重启后需要恢复仿真的订单 ----
+struct ResumeOrder {
+    int    orderId = 0, userId = 0, chargerId = 0, stationId = 0;
+    double startSoc = 0;
+};
+
 // 仿真器需要的参数: 桩功率、车辆电池容量、当前单价(分时电价 + 服务费)。
 struct SimParams {
     double powerKw = 0, batteryKwh = 60, unitPrice = 0;
@@ -92,6 +105,24 @@ void updateChargerElectrics(int chargerId, double voltage, double current, doubl
 // 往 charging_measure 落一条时序点(大屏负荷曲线用)。
 void insertMeasure(int chargerId, int stationId, const QString &time,
                    double powerKw, double soc, double energyDelta, double temperature);
+
+// ---- 预约 / 排队 ----
+// 加入排队。该站有空闲桩则直接 matched 并占位; 否则入队给一个 queue_no。
+// 同一用户在同一站重复调用是幂等的, 返回已有的那条, 不会重复排号。
+std::optional<ReservationView> joinQueue(int userId, int stationId, OpError *err);
+// 取消预约/排队(校验归属)。
+std::optional<ReservationView> cancelReservation(int userId, int reservationId, OpError *err);
+// 我的预约列表。
+QList<ReservationView> listReservations(int userId);
+// 电桩释放时叫号: 把该站队首的人匹配到空闲桩上。没人等或没空桩返回 nullopt。
+// 返回值用于推送 push.reservation_notify。
+std::optional<ReservationView> matchNextInQueue(int stationId);
+
+// ---- 服务端重启恢复 ----
+// 捞出所有仍在 charging 的订单, 交还给仿真器。
+QList<ResumeOrder> ordersToResume();
+// 把订单的 start_time 重置为现在(重启后重新计时)。
+void resetStartTime(int orderId);
 
 // 当前余额/积分(结算后回给客户端刷新用)。
 double userBalance(int userId);

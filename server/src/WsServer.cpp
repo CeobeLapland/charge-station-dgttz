@@ -11,6 +11,7 @@
 
 #include "AdminDao.h"
 #include "OrderDao.h"
+#include "WorkOrderDao.h"
 #include "ScreenDao.h"
 #include "StationDao.h"
 #include "UserDao.h"
@@ -115,6 +116,9 @@ WsServer::WsServer(quint16 port, QObject *parent)
     connect(m_sim, &ChargeSimulator::measureTick,    this, &WsServer::onSimMeasure);
     connect(m_sim, &ChargeSimulator::reachedTarget,  this, &WsServer::onSimReachedTarget);
     m_simThread.start();
+
+    // 服务端可能是重启起来的: 把仍在 charging 的订单交还给仿真线程
+    resumeChargingOrders();
 }
 
 WsServer::~WsServer()
@@ -244,6 +248,18 @@ QJsonObject WsServer::dispatch(QWebSocket *sock, const QString &type, const QJso
     if (type == QStringLiteral("order.cancel"))         return handleOrderCancel(sock, payload, code, message);
     if (type == QStringLiteral("order.list"))           return handleOrderList(sock, payload, code, message);
     if (type == QStringLiteral("order.detail"))         return handleOrderDetail(sock, payload, code, message);
+
+    // ---- 我的车辆 / 工单 / 预约 ----
+    if (type == QStringLiteral("user.update_profile")) return handleUserUpdateProfile(sock, payload, code, message);
+    if (type == QStringLiteral("vehicle.add"))         return handleVehicleAdd(sock, payload, code, message);
+    if (type == QStringLiteral("vehicle.list"))        return handleVehicleList(sock, payload, code, message);
+    if (type == QStringLiteral("vehicle.update"))      return handleVehicleUpdate(sock, payload, code, message);
+    if (type == QStringLiteral("vehicle.delete"))      return handleVehicleDelete(sock, payload, code, message);
+    if (type == QStringLiteral("work_order.create"))   return handleWorkOrderCreate(sock, payload, code, message);
+    if (type == QStringLiteral("work_order.list"))     return handleWorkOrderList(sock, payload, code, message);
+    if (type == QStringLiteral("reservation.join"))    return handleReservationJoin(sock, payload, code, message);
+    if (type == QStringLiteral("reservation.cancel"))  return handleReservationCancel(sock, payload, code, message);
+    if (type == QStringLiteral("reservation.list"))    return handleReservationList(sock, payload, code, message);
 
     // ---- 数据大屏(免登录只读) ----
     if (type == QStringLiteral("screen.snapshot"))      return handleScreenSnapshot(sock, payload, code, message);
@@ -522,10 +538,16 @@ QJsonObject WsServer::handleAdminChargerAction(QWebSocket *sock, const QJsonObje
 {
     if (!requireAdmin(sock, code, message)) return {};
     const int chargerId = payload.value(QStringLiteral("charger_id")).toInt();
-    const auto log = dao::chargerAction(chargerId, action, adminAccountOf(sock));
+    bool busy = false;
+    const auto log = dao::chargerAction(chargerId, action, adminAccountOf(sock), &busy);
     if (!log) {
-        code = 4001;
-        message = QStringLiteral("电桩不存在或操作失败: id=%1").arg(chargerId);
+        if (busy) {
+            code = 3002;
+            message = QStringLiteral("该电桩上有进行中的订单, 请等待用户结束后再操作");
+        } else {
+            code = 4001;
+            message = QStringLiteral("电桩不存在或操作失败: id=%1").arg(chargerId);
+        }
         return {};
     }
     const QString newStatus = (action == QStringLiteral("restart"))
@@ -798,6 +820,7 @@ QJsonObject WsServer::handleOrderFinish(QWebSocket *sock, const QJsonObject &pay
     if (!o) { code = err.code; message = err.message; return {}; }
     simRemoveOrder(o->id);          // 用户手动结束: 停掉仿真
     m_liveSoc.remove(o->id);
+    notifyQueueOnChargerFree(o->stationId);   // 桩空出来了, 叫下一位
 
     broadcast(QStringLiteral("push.charger_status"),
               QJsonObject{{"charger_id", o->chargerId}, {"station_id", o->stationId},
@@ -844,6 +867,7 @@ QJsonObject WsServer::handleOrderCancel(QWebSocket *sock, const QJsonObject &pay
     if (!o) { code = err.code; message = err.message; return {}; }
     simRemoveOrder(o->id);
     m_liveSoc.remove(o->id);
+    notifyQueueOnChargerFree(o->stationId);
 
     broadcast(QStringLiteral("push.charger_status"),
               QJsonObject{{"charger_id", o->chargerId}, {"station_id", o->stationId},
@@ -995,4 +1019,252 @@ void WsServer::onSimReachedTarget(int orderId, int userId, double endSoc)
         {"id", QStringLiteral("evt-o%1-target_reached").arg(orderId)},
         {"event_time", o->endTime}, {"event_type", "target_reached"},
         {"text", QStringLiteral("%1 %2 充电完成, 待结算").arg(o->stationName, o->chargerCode)}}}});
+}
+
+// ==================================================================
+//     我的资料 / 车辆 / 工单 / 预约排队
+// ==================================================================
+
+namespace {
+
+QJsonObject vehicleToJson(const Vehicle &v)
+{
+    return QJsonObject{
+        {"id", v.id}, {"user_id", v.userId}, {"name", v.name}, {"type", v.type},
+        {"battery_kwh", v.batteryKwh}, {"connector_type", v.connectorType},
+        {"max_power_kw", v.maxPowerKw}, {"is_default", v.isDefault},
+        {"created_time", v.createdTime},
+    };
+}
+
+QJsonObject workOrderToJson(const WorkOrderRow &w)
+{
+    return QJsonObject{
+        {"id", w.id}, {"type", w.type}, {"priority", w.priority},
+        {"user_id", w.userId}, {"station_id", w.stationId}, {"station_name", w.stationName},
+        {"charger_id", w.chargerId}, {"title", w.title}, {"description", w.description},
+        {"status", w.status}, {"handler", w.handler}, {"result", w.result},
+        {"create_time", w.createTime}, {"handle_time", w.handleTime},
+    };
+}
+
+QJsonObject reservationToJson(const dao::ReservationView &r)
+{
+    return QJsonObject{
+        {"id", r.id}, {"user_id", r.userId},
+        {"station_id", r.stationId}, {"station_name", r.stationName},
+        {"charger_id", r.chargerId > 0 ? QJsonValue(r.chargerId) : QJsonValue()},
+        {"charger_code", r.chargerCode},
+        {"queue_no", r.queueNo}, {"reserve_time", r.reserveTime},
+        {"estimate_start_time", r.estimateStartTime}, {"status", r.status},
+        {"ahead_count", r.aheadCount},
+    };
+}
+
+Vehicle vehicleFromJson(const QJsonObject &p, int userId)
+{
+    Vehicle v;
+    v.userId        = userId;
+    v.name          = p.value(QStringLiteral("name")).toString();
+    v.type          = p.value(QStringLiteral("type")).toString();
+    v.batteryKwh    = p.value(QStringLiteral("battery_kwh")).toDouble();
+    v.connectorType = p.value(QStringLiteral("connector_type")).toString();
+    v.maxPowerKw    = p.value(QStringLiteral("max_power_kw")).toDouble();
+    v.isDefault     = p.value(QStringLiteral("is_default")).toInt(0);
+    return v;
+}
+
+}  // namespace
+
+// ---------- user.update_profile ----------
+QJsonObject WsServer::handleUserUpdateProfile(QWebSocket *sock, const QJsonObject &payload,
+                                              int &code, QString &message)
+{
+    if (!requireUser(sock, code, message)) return {};
+    const QString nickname = payload.value(QStringLiteral("nickname")).toString();
+    const QString avatar   = payload.value(QStringLiteral("avatar_path")).toString();
+    if (nickname.trimmed().length() > 20) {
+        code = 9001;
+        message = QStringLiteral("昵称最长 20 个字符");
+        return {};
+    }
+    const auto u = dao::updateProfile(userIdOf(sock), nickname, avatar);
+    if (!u) { code = 4002; message = QStringLiteral("修改失败"); return {}; }
+    message = QStringLiteral("修改成功");
+    return QJsonObject{{"user", QJsonObject{
+        {"id", u->id}, {"phone", u->phone}, {"nickname", u->nickname},
+        {"avatar_path", u->avatarPath}, {"balance", u->balance}, {"points", u->points},
+        {"level", u->level}, {"status", u->status}}}};
+}
+
+// ---------- vehicle.* ----------
+QJsonObject WsServer::handleVehicleAdd(QWebSocket *sock, const QJsonObject &payload,
+                                       int &code, QString &message)
+{
+    if (!requireUser(sock, code, message)) return {};
+    const auto v = dao::addVehicle(vehicleFromJson(payload, userIdOf(sock)));
+    if (!v) { code = 4002; message = QStringLiteral("添加车辆失败"); return {}; }
+    message = QStringLiteral("添加成功");
+    return QJsonObject{{"vehicle", vehicleToJson(*v)}};
+}
+
+QJsonObject WsServer::handleVehicleList(QWebSocket *sock, const QJsonObject &,
+                                        int &code, QString &message)
+{
+    if (!requireUser(sock, code, message)) return {};
+    QJsonArray arr;
+    for (const auto &v : dao::listVehicles(userIdOf(sock))) arr.append(vehicleToJson(v));
+    return QJsonObject{{"vehicles", arr}};
+}
+
+QJsonObject WsServer::handleVehicleUpdate(QWebSocket *sock, const QJsonObject &payload,
+                                          int &code, QString &message)
+{
+    if (!requireUser(sock, code, message)) return {};
+    const int vid = payload.value(QStringLiteral("vehicle_id")).toInt();
+    const auto old = dao::findVehicle(userIdOf(sock), vid);
+    if (!old) { code = 4001; message = QStringLiteral("车辆不存在: id=%1").arg(vid); return {}; }
+
+    // 只覆盖 payload 里真的传了的字段, 没传的沿用原值(部分更新)
+    Vehicle v = *old;
+    if (payload.contains(QStringLiteral("name")))           v.name          = payload.value(QStringLiteral("name")).toString();
+    if (payload.contains(QStringLiteral("type")))           v.type          = payload.value(QStringLiteral("type")).toString();
+    if (payload.contains(QStringLiteral("battery_kwh")))    v.batteryKwh    = payload.value(QStringLiteral("battery_kwh")).toDouble();
+    if (payload.contains(QStringLiteral("connector_type"))) v.connectorType = payload.value(QStringLiteral("connector_type")).toString();
+    if (payload.contains(QStringLiteral("max_power_kw")))   v.maxPowerKw    = payload.value(QStringLiteral("max_power_kw")).toDouble();
+    if (payload.contains(QStringLiteral("is_default")))     v.isDefault     = payload.value(QStringLiteral("is_default")).toInt();
+
+    const auto nv = dao::updateVehicle(userIdOf(sock), vid, v);
+    if (!nv) { code = 4002; message = QStringLiteral("修改失败"); return {}; }
+    message = QStringLiteral("修改成功");
+    return QJsonObject{{"vehicle", vehicleToJson(*nv)}};
+}
+
+QJsonObject WsServer::handleVehicleDelete(QWebSocket *sock, const QJsonObject &payload,
+                                          int &code, QString &message)
+{
+    if (!requireUser(sock, code, message)) return {};
+    const int vid = payload.value(QStringLiteral("vehicle_id")).toInt();
+    bool busy = false;
+    if (!dao::deleteVehicle(userIdOf(sock), vid, &busy)) {
+        if (busy) {
+            code = 2003;
+            message = QStringLiteral("这辆车有进行中的订单, 无法删除");
+        } else {
+            code = 4001;
+            message = QStringLiteral("车辆不存在: id=%1").arg(vid);
+        }
+        return {};
+    }
+    message = QStringLiteral("已删除");
+    return QJsonObject{{"vehicle_id", vid}};
+}
+
+// ---------- work_order.* ----------
+QJsonObject WsServer::handleWorkOrderCreate(QWebSocket *sock, const QJsonObject &payload,
+                                            int &code, QString &message)
+{
+    if (!requireUser(sock, code, message)) return {};
+    const QString title = payload.value(QStringLiteral("title")).toString();
+    const QString desc  = payload.value(QStringLiteral("description")).toString();
+    if (title.trimmed().isEmpty() && desc.trimmed().isEmpty()) {
+        code = 9001;
+        message = QStringLiteral("title 和 description 不能都为空");
+        return {};
+    }
+    const auto w = dao::createWorkOrder(
+        userIdOf(sock), payload.value(QStringLiteral("type")).toString(),
+        payload.value(QStringLiteral("station_id")).toInt(0),
+        payload.value(QStringLiteral("charger_id")).toInt(0), title, desc);
+    if (!w) { code = 4002; message = QStringLiteral("提交失败"); return {}; }
+
+    // 管理端的工单面板需要知道有新工单进来
+    broadcast(QStringLiteral("push.work_order"), QJsonObject{{"work_order", workOrderToJson(*w)}});
+    message = QStringLiteral("已提交, 我们会尽快处理");
+    return QJsonObject{{"work_order", workOrderToJson(*w)}};
+}
+
+QJsonObject WsServer::handleWorkOrderList(QWebSocket *sock, const QJsonObject &,
+                                          int &code, QString &message)
+{
+    if (!requireUser(sock, code, message)) return {};
+    QJsonArray arr;
+    for (const auto &w : dao::listWorkOrders(userIdOf(sock))) arr.append(workOrderToJson(w));
+    return QJsonObject{{"work_orders", arr}};
+}
+
+// ---------- reservation.* ----------
+QJsonObject WsServer::handleReservationJoin(QWebSocket *sock, const QJsonObject &payload,
+                                            int &code, QString &message)
+{
+    if (!requireUser(sock, code, message)) return {};
+    const int stationId = payload.value(QStringLiteral("station_id")).toInt();
+    OpError err;
+    const auto r = dao::joinQueue(userIdOf(sock), stationId, &err);
+    if (!r) { code = err.code; message = err.message; return {}; }
+
+    const bool matched = (r->status == QStringLiteral("matched"));
+    message = matched ? QStringLiteral("已为您锁定一台空闲桩")
+                      : QStringLiteral("已加入排队, 前面还有 %1 位").arg(r->aheadCount);
+    return QJsonObject{
+        {"reservation", reservationToJson(*r)},
+        {"matched", matched},
+        {"queue", QJsonObject{{"queue_no", r->queueNo}, {"ahead_count", r->aheadCount},
+                              {"estimate_start_time", r->estimateStartTime}}},
+    };
+}
+
+QJsonObject WsServer::handleReservationCancel(QWebSocket *sock, const QJsonObject &payload,
+                                              int &code, QString &message)
+{
+    if (!requireUser(sock, code, message)) return {};
+    const int rid = payload.value(QStringLiteral("reservation_id")).toInt();
+    OpError err;
+    const auto r = dao::cancelReservation(userIdOf(sock), rid, &err);
+    if (!r) { code = err.code; message = err.message; return {}; }
+    // 这个人本来占着位置, 取消后队伍往前走一位
+    notifyQueueOnChargerFree(r->stationId);
+    message = QStringLiteral("已取消");
+    return QJsonObject{{"reservation", reservationToJson(*r)}};
+}
+
+QJsonObject WsServer::handleReservationList(QWebSocket *sock, const QJsonObject &,
+                                            int &code, QString &message)
+{
+    if (!requireUser(sock, code, message)) return {};
+    QJsonArray arr;
+    for (const auto &r : dao::listReservations(userIdOf(sock))) arr.append(reservationToJson(r));
+    return QJsonObject{{"reservations", arr}};
+}
+
+// ---------- 桩空出来 → 叫号 ----------
+void WsServer::notifyQueueOnChargerFree(int stationId)
+{
+    if (stationId <= 0) return;
+    const auto r = dao::matchNextInQueue(stationId);
+    if (!r) return;                                   // 没人排队, 或没有空桩
+    qInfo().noquote() << QStringLiteral("[排队] %1 有空桩, 通知 user_id=%2 (预约 #%3)")
+                             .arg(r->stationName).arg(r->userId).arg(r->id);
+    sendToUser(r->userId, QStringLiteral("push.reservation_notify"),
+               QJsonObject{{"reservation", reservationToJson(*r)},
+                           {"charger_id", r->chargerId},
+                           {"station_id", r->stationId},
+                           {"station_name", r->stationName},
+                           {"message", QStringLiteral("轮到您了, 请在 15 分钟内到场扫码")}});
+}
+
+// ---------- 服务端重启: 恢复仍在充电的订单 ----------
+void WsServer::resumeChargingOrders()
+{
+    const auto list = dao::ordersToResume();
+    if (list.isEmpty()) return;
+    for (const auto &o : list) {
+        // 重启相当于这次充电会话重新计时, 否则时长会把停机那段也算进去
+        dao::resetStartTime(o.orderId);
+        const auto sp = dao::simParamsOf(o.orderId);
+        simAddOrder(o.orderId, o.userId, o.chargerId, o.stationId,
+                    o.startSoc, 100.0, sp.powerKw, sp.batteryKwh, sp.unitPrice);
+    }
+    qInfo().noquote() << QStringLiteral("[恢复] 已把 %1 笔进行中的充电订单交还给仿真线程")
+                             .arg(list.size());
 }

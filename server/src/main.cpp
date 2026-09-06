@@ -7,13 +7,11 @@
 #include "UserDao.h"
 #include "WsServer.h"
 
-// ============================================================
 // 服务端入口
-//   ./charge_server                      → 启动 WebSocket 服务(端口9000, 库 ../sql/charge.db)
+//   ./charge_server                      → 启动 WebSocket 服务(端口9000)
 //   ./charge_server --db 路径            → 指定数据库文件
 //   ./charge_server --port 9000          → 指定端口
 //   ./charge_server --selftest           → 只跑 DAO 自测, 不启服务
-// ============================================================
 
 static int runSelfTest()
 {
@@ -50,7 +48,7 @@ int main(int argc, char *argv[])
     // 简易命令行参数解析
     const QStringList args = app.arguments();
     QString dbPath = QStringLiteral("../sql/charge.db");
-    quint16 port = 9000;   // spec-协议.md 待定项建议初值
+    quint16 port = 9000;
     bool selftest = false;
     for (int i = 1; i < args.size(); ++i) {
         if (args[i] == QStringLiteral("--db") && i + 1 < args.size())
@@ -75,5 +73,5 @@ int main(int argc, char *argv[])
         return 2;
 
     qInfo().noquote() << QStringLiteral("服务端运行中, 等待各端连接... (Ctrl+C 退出)");
-    return app.exec();   // 进入Qt事件循环: 从此程序"挂机"等消息, 收发全靠信号槽驱动
+    return app.exec();   // 进入Qt事件循环
 }
