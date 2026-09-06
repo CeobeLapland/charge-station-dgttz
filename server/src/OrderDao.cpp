@@ -154,6 +154,220 @@ void insertMeasure(int chargerId, int stationId, const QString &time,
     q.exec();
 }
 
+// ---- 服务端重启后, 把仍在 charging 的订单捞出来交还给仿真器 ----
+// 不做这件事的话: 仿真状态只在内存里, 重启后没人再推进这些订单,
+// 电桩永远停在 charging, 那根桩从此不能被任何人使用。
+QList<ResumeOrder> ordersToResume()
+{
+    QList<ResumeOrder> out;
+    QSqlQuery q;
+    if (!q.exec(QStringLiteral(
+            "SELECT id, user_id, charger_id, station_id, IFNULL(start_soc,20) "
+            "FROM charging_order WHERE status='charging'")))
+        return out;
+    while (q.next()) {
+        ResumeOrder r;
+        r.orderId   = q.value(0).toInt();
+        r.userId    = q.value(1).toInt();
+        r.chargerId = q.value(2).toInt();
+        r.stationId = q.value(3).toInt();
+        r.startSoc  = q.value(4).toDouble();
+        out.append(r);
+    }
+    return out;
+}
+
+// 恢复时把 start_time 重置为现在: 服务端重启 = 这次充电会话重新计时,
+// 否则时长会把停机的那段时间也算进去。
+void resetStartTime(int orderId)
+{
+    QSqlQuery q;
+    q.prepare(QStringLiteral("UPDATE charging_order SET start_time=? WHERE id=?"));
+    q.addBindValue(nowStr());
+    q.addBindValue(orderId);
+    q.exec();
+}
+
+// ================== 预约 / 智能排队 ==================
+namespace {
+
+ReservationView rowToReservation(const QSqlQuery &q)
+{
+    ReservationView r;
+    r.id                = q.value(0).toInt();
+    r.userId            = q.value(1).toInt();
+    r.stationId         = q.value(2).toInt();
+    r.chargerId         = q.value(3).toInt();
+    r.queueNo           = q.value(4).toInt();
+    r.reserveTime       = q.value(5).toString();
+    r.estimateStartTime = q.value(6).toString();
+    r.status            = q.value(7).toString();
+    r.stationName       = q.value(8).toString();
+    r.chargerCode       = q.value(9).toString();
+    return r;
+}
+
+const char *kSelectReservation =
+    "SELECT r.id, r.user_id, r.station_id, IFNULL(r.charger_id,0), r.queue_no, "
+    "       r.reserve_time, IFNULL(r.estimate_start_time,''), r.status, "
+    "       s.name, IFNULL((SELECT code FROM charger c WHERE c.id=r.charger_id),'') "
+    "FROM reservation r JOIN station s ON s.id=r.station_id ";
+
+// 该站当前排在此人前面、还在等待的人数
+int aheadOf(int stationId, int queueNo)
+{
+    QSqlQuery q;
+    q.prepare(QStringLiteral(
+        "SELECT COUNT(*) FROM reservation WHERE station_id=? AND status='waiting' AND queue_no<?"));
+    q.addBindValue(stationId);
+    q.addBindValue(queueNo);
+    if (!q.exec() || !q.next()) return 0;
+    return q.value(0).toInt();
+}
+
+std::optional<ReservationView> fetchReservation(int id)
+{
+    QSqlQuery q;
+    q.prepare(QString::fromLatin1(kSelectReservation) + QStringLiteral("WHERE r.id=?"));
+    q.addBindValue(id);
+    if (!q.exec() || !q.next()) return std::nullopt;
+    ReservationView r = rowToReservation(q);
+    r.aheadCount = (r.status == QStringLiteral("waiting")) ? aheadOf(r.stationId, r.queueNo) : 0;
+    return r;
+}
+
+// 找该站一台空闲桩, 没有返回 0
+int findIdleCharger(int stationId)
+{
+    QSqlQuery q;
+    q.prepare(QStringLiteral(
+        "SELECT id FROM charger WHERE station_id=? AND status='idle' ORDER BY id LIMIT 1"));
+    q.addBindValue(stationId);
+    if (!q.exec() || !q.next()) return 0;
+    return q.value(0).toInt();
+}
+
+}  // namespace
+
+std::optional<ReservationView> joinQueue(int userId, int stationId, OpError *err)
+{
+    // 电站必须存在
+    if (scalarOf(QStringLiteral("SELECT COUNT(*) FROM station WHERE id=?"), {stationId}) < 1) {
+        fail(err, 4001, QStringLiteral("电站不存在: id=%1").arg(stationId));
+        return std::nullopt;
+    }
+    // 幂等: 同一个人在同一个站重复加入, 直接返回已有的那条, 不重复排号
+    QSqlQuery ex;
+    ex.prepare(QStringLiteral(
+        "SELECT id FROM reservation WHERE user_id=? AND station_id=? "
+        "AND status IN ('waiting','matched') ORDER BY id DESC LIMIT 1"));
+    ex.addBindValue(userId);
+    ex.addBindValue(stationId);
+    if (ex.exec() && ex.next())
+        return fetchReservation(ex.value(0).toInt());
+
+    const int idle = findIdleCharger(stationId);
+
+    QSqlDatabase::database().transaction();
+    QSqlQuery ins;
+    if (idle > 0) {
+        // 有空桩 → 直接匹配, 不用排队
+        ins.prepare(QStringLiteral(
+            "INSERT INTO reservation(user_id,station_id,charger_id,queue_no,reserve_time,"
+            "  estimate_start_time,notified,status) VALUES(?,?,?,0,?,?,1,'matched')"));
+        ins.addBindValue(userId);
+        ins.addBindValue(stationId);
+        ins.addBindValue(idle);
+        ins.addBindValue(nowStr());
+        ins.addBindValue(nowStr());
+    } else {
+        // 没空桩 → 入队。排号 = 当前等待人数 + 1, 预计每人 20 分钟
+        const int waiting = static_cast<int>(scalarOf(
+            QStringLiteral("SELECT COUNT(*) FROM reservation WHERE station_id=? AND status='waiting'"),
+            {stationId}));
+        const int queueNo = waiting + 1;
+        const QString eta = QDateTime::currentDateTime().addSecs(queueNo * 20 * 60)
+                                .toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"));
+        ins.prepare(QStringLiteral(
+            "INSERT INTO reservation(user_id,station_id,charger_id,queue_no,reserve_time,"
+            "  estimate_start_time,notified,status) VALUES(?,?,NULL,?,?,?,0,'waiting')"));
+        ins.addBindValue(userId);
+        ins.addBindValue(stationId);
+        ins.addBindValue(queueNo);
+        ins.addBindValue(nowStr());
+        ins.addBindValue(eta);
+    }
+    if (!ins.exec()) {
+        QSqlDatabase::database().rollback();
+        fail(err, 4002, QStringLiteral("加入排队失败"));
+        return std::nullopt;
+    }
+    const int rid = ins.lastInsertId().toInt();
+    QSqlDatabase::database().commit();
+    return fetchReservation(rid);
+}
+
+std::optional<ReservationView> cancelReservation(int userId, int reservationId, OpError *err)
+{
+    const auto r = fetchReservation(reservationId);
+    if (!r || r->userId != userId) {
+        fail(err, 4001, QStringLiteral("预约不存在: id=%1").arg(reservationId));
+        return std::nullopt;
+    }
+    if (r->status == QStringLiteral("cancelled")) {
+        fail(err, 2003, QStringLiteral("该预约已取消"));
+        return std::nullopt;
+    }
+    QSqlQuery up;
+    up.prepare(QStringLiteral("UPDATE reservation SET status='cancelled' WHERE id=?"));
+    up.addBindValue(reservationId);
+    if (!up.exec()) {
+        fail(err, 4002, QStringLiteral("取消失败"));
+        return std::nullopt;
+    }
+    return fetchReservation(reservationId);
+}
+
+QList<ReservationView> listReservations(int userId)
+{
+    QList<ReservationView> out;
+    QSqlQuery q;
+    q.prepare(QString::fromLatin1(kSelectReservation)
+              + QStringLiteral("WHERE r.user_id=? ORDER BY r.id DESC"));
+    q.addBindValue(userId);
+    if (!q.exec()) return out;
+    while (q.next()) {
+        ReservationView r = rowToReservation(q);
+        if (r.status == QStringLiteral("waiting")) r.aheadCount = aheadOf(r.stationId, r.queueNo);
+        out.append(r);
+    }
+    return out;
+}
+
+std::optional<ReservationView> matchNextInQueue(int stationId)
+{
+    const int idle = findIdleCharger(stationId);
+    if (idle <= 0) return std::nullopt;             // 没有空桩, 不用叫号
+
+    QSqlQuery q;
+    q.prepare(QStringLiteral(
+        "SELECT id FROM reservation WHERE station_id=? AND status='waiting' AND notified=0 "
+        "ORDER BY queue_no, id LIMIT 1"));
+    q.addBindValue(stationId);
+    if (!q.exec() || !q.next()) return std::nullopt;  // 没人在等
+    const int rid = q.value(0).toInt();
+
+    QSqlQuery up;
+    up.prepare(QStringLiteral(
+        "UPDATE reservation SET status='matched', charger_id=?, notified=1, estimate_start_time=? "
+        "WHERE id=?"));
+    up.addBindValue(idle);
+    up.addBindValue(nowStr());
+    up.addBindValue(rid);
+    if (!up.exec()) return std::nullopt;
+    return fetchReservation(rid);
+}
+
 SimParams simParamsOf(int orderId)
 {
     SimParams p;
@@ -307,9 +521,18 @@ std::optional<OrderView> finishOrder(int userId, int orderId, double endSoc, OpE
         finalSoc = qMin(100.0, endSoc);
         energy   = (finalSoc - o->startSoc) / 100.0 * (batteryKwh > 0 ? batteryKwh : 60.0);
     } else {
-        // 没给: 按 实际时长 × 功率 × 0.92(充电效率) 估算
-        energy   = powerKw * (durationMin / 60.0) * 0.92;
-        finalSoc = qMin(100.0, o->startSoc + energy / (batteryKwh > 0 ? batteryKwh : 60.0) * 100.0);
+        // 没给: 按 实际时长 × 功率 × 0.92(充电效率) 估算。
+        // ★ 必须按电池剩余容量封顶 —— 否则服务端重启后结束一笔旧订单时,
+        //   duration 会是几千分钟, 算出"给 60kWh 的车充了 7000 度电"的天价账单。
+        const double cap = batteryKwh > 0 ? batteryKwh : 60.0;
+        const double roomKwh = qMax(0.0, (100.0 - o->startSoc) / 100.0 * cap);
+        energy   = qMin(roomKwh, powerKw * (durationMin / 60.0) * 0.92);
+        finalSoc = qMin(100.0, o->startSoc + energy / cap * 100.0);
+    }
+    // 时长同样封顶: 最多按"充满所需时间"计, 避免订单详情里出现几千分钟
+    if (powerKw > 0) {
+        const int maxMin = static_cast<int>(std::ceil(energy / (powerKw * 0.92) * 60.0));
+        if (maxMin > 0 && durationMin > maxMin) durationMin = maxMin;
     }
     energy = std::round(energy * 100) / 100.0;
 

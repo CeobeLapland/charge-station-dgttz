@@ -9,8 +9,6 @@ ChargeSimulator::ChargeSimulator(QObject *parent) : QObject(parent) {}
 
 void ChargeSimulator::startTicking()
 {
-    // 注意: QTimer 在这里 new, 这个函数是通过队列连接在工作线程里执行的,
-    // 所以定时器天然属于工作线程, 不会占用主线程。
     m_timer = new QTimer(this);
     m_timer->setInterval(kTickMs);
     connect(m_timer, &QTimer::timeout, this, &ChargeSimulator::onTick);
@@ -76,7 +74,7 @@ void ChargeSimulator::onTick()
                       s.soc >= 95 ? s.powerKw * 0.25 : (s.soc >= 80 ? s.powerKw * 0.5 : s.powerKw),
                       std::round(s.energyKwh * 100) / 100.0, cost, etaMin);
 
-        // 每 kMeasureEveryTicks 个 tick 落一条时序点, 喂大屏的负荷曲线
+        // 每 kMeasureEveryTicks 个 tick 落一条时序点
         if (s.ticks % kMeasureEveryTicks == 0)
             emit measureTick(s.chargerId, s.stationId, s.powerKw,
                              std::round(s.soc * 10) / 10.0, std::round(kwh * 1000) / 1000.0);
