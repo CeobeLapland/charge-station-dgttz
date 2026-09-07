@@ -15,6 +15,16 @@ class AuthStore : public QObject {
     // —— 全局设置（全用户共享，经 QSettings "prefs/*" 持久化）——
     Q_PROPERTY(QString mapTileSource READ mapTileSource WRITE setMapTileSource NOTIFY mapTileSourceChanged)
     Q_PROPERTY(QString mapTileCustomUrl READ mapTileCustomUrl WRITE setMapTileCustomUrl NOTIFY mapTileCustomUrlChanged)
+    // —— 通知偏好（prefs/notify/*）——
+    Q_PROPERTY(bool notifyChargeDone READ notifyChargeDone WRITE setNotifyChargeDone NOTIFY notifyChargeDoneChanged)
+    Q_PROPERTY(bool notifyOrder READ notifyOrder WRITE setNotifyOrder NOTIFY notifyOrderChanged)
+    Q_PROPERTY(bool notifyPromo READ notifyPromo WRITE setNotifyPromo NOTIFY notifyPromoChanged)
+    // —— 充电偏好（prefs/charge/*）——
+    Q_PROPERTY(bool autoStop READ autoStop WRITE setAutoStop NOTIFY autoStopChanged)
+    Q_PROPERTY(QString chargeMode READ chargeMode WRITE setChargeMode NOTIFY chargeModeChanged)
+    Q_PROPERTY(int lowBatteryThreshold READ lowBatteryThreshold WRITE setLowBatteryThreshold NOTIFY lowBatteryThresholdChanged)
+    // —— 隐私（prefs/privacy/*）——
+    Q_PROPERTY(bool shareToScreen READ shareToScreen WRITE setShareToScreen NOTIFY shareToScreenChanged)
 
 public:
     explicit AuthStore(QObject* parent = nullptr);
@@ -65,10 +75,37 @@ public:
     // 预置瓦片源字典（JSON 数组字符串，QML 直接用）
     Q_INVOKABLE QString mapTilePresetsJson() const;
 
+    // —— 通知偏好 ——
+    bool notifyChargeDone() const;
+    void setNotifyChargeDone(bool on);
+    bool notifyOrder() const;
+    void setNotifyOrder(bool on);
+    bool notifyPromo() const;
+    void setNotifyPromo(bool on);
+
+    // —— 充电偏好 ——
+    bool autoStop() const;
+    void setAutoStop(bool on);
+    QString chargeMode() const;
+    void setChargeMode(const QString& mode);
+    int lowBatteryThreshold() const;
+    void setLowBatteryThreshold(int pct);
+
+    // —— 隐私 ——
+    bool shareToScreen() const;
+    void setShareToScreen(bool on);
+
 signals:
     void currentAccountChanged();
     void mapTileSourceChanged();
     void mapTileCustomUrlChanged();
+    void notifyChargeDoneChanged();
+    void notifyOrderChanged();
+    void notifyPromoChanged();
+    void autoStopChanged();
+    void chargeModeChanged();
+    void lowBatteryThresholdChanged();
+    void shareToScreenChanged();
 
 private:
     QString groupKey(const QString& account) const;
