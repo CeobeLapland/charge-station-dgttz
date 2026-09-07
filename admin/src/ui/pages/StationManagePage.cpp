@@ -17,6 +17,11 @@
 #include <QVBoxLayout>
 
 #include "network/Protocol.h"
+#include <QUrl>
+
+#ifdef HAS_WEBENGINE
+#include <QtWebEngineWidgets/QWebEngineView>
+#endif
 #include "services/ApiClient.h"
 
 StationManagePage::StationManagePage(ApiClient* api, QWidget* parent)
@@ -150,8 +155,50 @@ void StationManagePage::onShowDetail() {
 
     QDialog dlg(this);
     dlg.setWindowTitle(QStringLiteral("站内详情 · %1").arg(name));
-    dlg.resize(720, 420);
+    dlg.resize(760, 540);
     auto* layout = new QVBoxLayout(&dlg);
+    // 顶部：电站位置地图（Linux+QWebEngine 用 Leaflet+Esri；否则占位）
+    const double lng = m_table->item(row, 3)->text().toDouble();
+    const double lat = m_table->item(row, 4)->text().toDouble();
+#ifdef HAS_WEBENGINE
+    {
+        auto* mapView = new QWebEngineView(&dlg);
+        QString html = QStringLiteral(R"(
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<link rel="stylesheet" href="leaflet.css">
+<script src="leaflet.js"></script>
+<style>html,body,#m{height:100%;margin:0;background:#dde8f0;}</style>
+</head>
+<body><div id="m"></div>
+<script>
+var map = L.map('m').setView([__LAT__, __LNG__], 13);
+L.tileLayer('https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}', {subdomains: '1234', maxZoom: 18, attribution: 'AutoNavi'}).addTo(map);
+L.circleMarker([__LAT__, __LNG__], {radius: 9, color: '#ffffff', weight: 2, fillColor: '#e63946', fillOpacity: 1}).addTo(map).bindPopup('<b>__NAME__</b>').openPopup();
+</script>
+</body></html>
+)");
+        html.replace(QStringLiteral("__LAT__"), QString::number(lat, 'f', 6))
+            .replace(QStringLiteral("__LNG__"), QString::number(lng, 'f', 6))
+            .replace(QStringLiteral("__NAME__"), name);
+        mapView->setHtml(html, QUrl(QStringLiteral("qrc:/map/")));
+        mapView->setFixedHeight(260);
+        layout->addWidget(mapView);
+    }
+#else
+    {
+        auto* placeholder = new QLabel(QStringLiteral(
+            "地图需在 Linux + QWebEngine 环境显示\n电站：%1（经度 %2，纬度 %3）")
+                                           .arg(name)
+                                           .arg(lng, 0, 'f', 6)
+                                           .arg(lat, 0, 'f', 6),
+                                       &dlg);
+        placeholder->setAlignment(Qt::AlignCenter);
+        placeholder->setFixedHeight(110);
+        placeholder->setStyleSheet(QStringLiteral("color:#8a97a5;"));
+        layout->addWidget(placeholder);
+    }
+#endif
     auto* table = new QTableWidget(0, 6);
     table->setHorizontalHeaderLabels({QStringLiteral("编号"), QStringLiteral("类型"),
                                       QStringLiteral("功率(kW)"), QStringLiteral("状态"),

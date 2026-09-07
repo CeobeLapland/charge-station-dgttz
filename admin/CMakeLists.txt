@@ -1,7 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-
 project(AdminClient VERSION 0.1.0 LANGUAGES CXX)
-
 # ============================================================
 # 依赖隔离：admin 只声明自己需要的 Qt 模块，不依赖根目录其他子项目。
 # 同时支持 Qt6（Linux 正式构建，C++17）与 Qt5（Windows 预览，C++14）。
@@ -12,7 +10,6 @@ project(AdminClient VERSION 0.1.0 LANGUAGES CXX)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
-
 find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS
     Widgets
     Charts
@@ -32,25 +29,20 @@ if(QT_VERSION_MAJOR EQUAL 5)
     # Qt 5.8 自带 MinGW 5.3 不支持 C++17
     set(CMAKE_CXX_STANDARD 14)
 endif()
-
 add_executable(admin_client
     src/main.cpp
     resources/resources.qrc
-
     src/network/Protocol.h
     src/network/ServerConnection.h
     src/network/ServerConnection.cpp
     src/network/MockDataProvider.h
     src/network/MockDataProvider.cpp
-
     src/services/ApiClient.h
     src/services/ApiClient.cpp
-
     src/ui/LoginDialog.h
     src/ui/LoginDialog.cpp
     src/ui/MainWindow.h
     src/ui/MainWindow.cpp
-
     src/ui/pages/SalesPage.h
     src/ui/pages/SalesPage.cpp
     src/ui/pages/ChargerStatusPage.h
@@ -66,14 +58,19 @@ add_executable(admin_client
     src/ui/pages/DecisionPage.h
     src/ui/pages/DecisionPage.cpp
 )
-
 target_include_directories(admin_client PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
-
 target_link_libraries(admin_client PRIVATE
     Qt${QT_VERSION_MAJOR}::Widgets
     Qt${QT_VERSION_MAJOR}::Charts
     Qt${QT_VERSION_MAJOR}::Network
     Qt${QT_VERSION_MAJOR}::WebSockets
 )
+
+# 可选 WebEngine：Linux 有则地图真显示；Windows MinGW 没有则降级为占位
+find_package(Qt6 COMPONENTS WebEngineWidgets QUIET)
+if(Qt6WebEngineWidgets_FOUND)
+    target_link_libraries(admin_client PRIVATE Qt6::WebEngineWidgets)
+    target_compile_definitions(admin_client PRIVATE HAS_WEBENGINE=1)
+endif()

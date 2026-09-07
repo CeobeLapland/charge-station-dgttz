@@ -350,6 +350,77 @@ QJsonObject MockDataProvider::chargerRestart(int chargerId) {
     return okPayload(payload);
 }
 
+QJsonObject MockDataProvider::chargerPause(int chargerId) {
+    QJsonArray& chargers = chargerCache();
+    bool found = false;
+    for (QJsonValueRef cv : chargers) {
+        QJsonObject obj = cv.toObject();
+        if (obj.value(QStringLiteral("id")).toInt() == chargerId) {
+            obj.insert(QStringLiteral("status"), QStringLiteral("offline"));
+            cv = obj;
+            found = true;
+            break;
+        }
+    }
+    if (!found) {
+        return errPayload(proto::code::DataNotFound, QStringLiteral("电桩不存在"));
+    }
+    QJsonObject deviceLog;
+    deviceLog.insert(QStringLiteral("id"), chargerId * 100 + 2);
+    deviceLog.insert(QStringLiteral("charger_id"), chargerId);
+    deviceLog.insert(QStringLiteral("action"), QStringLiteral("pause"));
+    deviceLog.insert(QStringLiteral("operator"), QStringLiteral("admin"));
+    deviceLog.insert(QStringLiteral("op_time"), now());
+    deviceLog.insert(QStringLiteral("result"), QStringLiteral("success"));
+    QJsonObject payload;
+    payload.insert(QStringLiteral("charger_id"), chargerId);
+    payload.insert(QStringLiteral("status"), QStringLiteral("offline"));
+    payload.insert(QStringLiteral("device_log"), deviceLog);
+    return okPayload(payload);
+}
+
+QJsonObject MockDataProvider::addCharger(const QJsonObject& charger) {
+    QJsonArray& chargers = chargerCache();
+    int nextId = 1;
+    for (const QJsonValue& cv : chargers) {
+        nextId = qMax(nextId, cv.toObject().value(QStringLiteral("id")).toInt() + 1);
+    }
+    const int stationId = charger.value(QStringLiteral("station_id")).toInt(1);
+    // 站内编号：A-001 形式；编号数 = 该站已有桩数+1
+    int countInStation = 0;
+    for (const QJsonValue& cv : chargers) {
+        if (cv.toObject().value(QStringLiteral("station_id")).toInt() == stationId) {
+            ++countInStation;
+        }
+    }
+    const QChar letter = QChar(static_cast<ushort>('A' + (stationId - 1) % 26));
+    QJsonObject c;
+    c.insert(QStringLiteral("id"), nextId);
+    c.insert(QStringLiteral("code"),
+             QString(QStringLiteral("%1-%2")).arg(letter).arg(countInStation + 1, 3, 10, QChar('0')));
+    c.insert(QStringLiteral("station_id"), stationId);
+    c.insert(QStringLiteral("type"),
+             charger.value(QStringLiteral("type")).toString(QStringLiteral("fast")));
+    c.insert(QStringLiteral("power"), charger.value(QStringLiteral("power")).toDouble(60.0));
+    c.insert(QStringLiteral("status"), QStringLiteral("idle"));
+    c.insert(QStringLiteral("temperature"), 26.0);
+    c.insert(QStringLiteral("comm_status"), QStringLiteral("normal"));
+    c.insert(QStringLiteral("health_score"), 100);
+    c.insert(QStringLiteral("total_charge_count"), 0);
+    c.insert(QStringLiteral("total_charge_duration"), 0);
+    // station_name 便于界面显示
+    const QJsonArray stations = stationCache();
+    for (const QJsonValue& sv : stations) {
+        if (sv.toObject().value(QStringLiteral("id")).toInt() == stationId) {
+            c.insert(QStringLiteral("station_name"), sv.toObject().value(QStringLiteral("name")).toString());
+            break;
+        }
+    }
+    chargers.append(c);
+    QJsonObject payload;
+    payload.insert(QStringLiteral("charger"), c);
+    return okPayload(payload);
+}
 QJsonObject MockDataProvider::toggleUserStatus(int userId, const QString& status) {
     QJsonArray& users = userCache();
     for (QJsonValueRef uv : users) {

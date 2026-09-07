@@ -1,5 +1,7 @@
 <RCC>
     <qresource prefix="/">
         <file>theme.qss</file>
+        <file>map/leaflet.js</file>
+        <file>map/leaflet.css</file>
     </qresource>
 </RCC>
