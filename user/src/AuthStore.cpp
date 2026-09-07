@@ -190,3 +190,80 @@ QString AuthStore::mapTilePresetsJson() const {
     }
     return QString::fromUtf8(QJsonDocument(arr).toJson(QJsonDocument::Compact));
 }
+
+// —— 全局设置：通知偏好 ——
+
+bool AuthStore::notifyChargeDone() const {
+    return m_settings.value(QStringLiteral("prefs/notify/charge_done"), true).toBool();
+}
+void AuthStore::setNotifyChargeDone(bool on) {
+    if (on == notifyChargeDone()) return;
+    m_settings.setValue(QStringLiteral("prefs/notify/charge_done"), on);
+    m_settings.sync();
+    emit notifyChargeDoneChanged();
+}
+
+bool AuthStore::notifyOrder() const {
+    return m_settings.value(QStringLiteral("prefs/notify/order"), true).toBool();
+}
+void AuthStore::setNotifyOrder(bool on) {
+    if (on == notifyOrder()) return;
+    m_settings.setValue(QStringLiteral("prefs/notify/order"), on);
+    m_settings.sync();
+    emit notifyOrderChanged();
+}
+
+bool AuthStore::notifyPromo() const {
+    return m_settings.value(QStringLiteral("prefs/notify/promo"), true).toBool();
+}
+void AuthStore::setNotifyPromo(bool on) {
+    if (on == notifyPromo()) return;
+    m_settings.setValue(QStringLiteral("prefs/notify/promo"), on);
+    m_settings.sync();
+    emit notifyPromoChanged();
+}
+
+// —— 全局设置：充电偏好 ——
+
+bool AuthStore::autoStop() const {
+    return m_settings.value(QStringLiteral("prefs/charge/auto_stop"), true).toBool();
+}
+void AuthStore::setAutoStop(bool on) {
+    if (on == autoStop()) return;
+    m_settings.setValue(QStringLiteral("prefs/charge/auto_stop"), on);
+    m_settings.sync();
+    emit autoStopChanged();
+}
+
+QString AuthStore::chargeMode() const {
+    return m_settings.value(QStringLiteral("prefs/charge/mode"), QStringLiteral("fast")).toString();
+}
+void AuthStore::setChargeMode(const QString& mode) {
+    if (mode == chargeMode()) return;
+    m_settings.setValue(QStringLiteral("prefs/charge/mode"), mode);
+    m_settings.sync();
+    emit chargeModeChanged();
+}
+
+int AuthStore::lowBatteryThreshold() const {
+    return m_settings.value(QStringLiteral("prefs/charge/low_battery"), 20).toInt();
+}
+void AuthStore::setLowBatteryThreshold(int pct) {
+    pct = qBound(5, pct, 30);
+    if (pct == lowBatteryThreshold()) return;
+    m_settings.setValue(QStringLiteral("prefs/charge/low_battery"), pct);
+    m_settings.sync();
+    emit lowBatteryThresholdChanged();
+}
+
+// —— 全局设置：隐私 ——
+
+bool AuthStore::shareToScreen() const {
+    return m_settings.value(QStringLiteral("prefs/privacy/share_to_screen"), false).toBool();
+}
+void AuthStore::setShareToScreen(bool on) {
+    if (on == shareToScreen()) return;
+    m_settings.setValue(QStringLiteral("prefs/privacy/share_to_screen"), on);
+    m_settings.sync();
+    emit shareToScreenChanged();
+}

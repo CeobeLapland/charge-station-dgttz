@@ -266,6 +266,22 @@ def main():
     c.execute("""INSERT INTO notification(user_id,type,title,content,related_id,is_read,create_time)
                  VALUES(1,'order','充电进行中','您在高新软件园站的充电已开始',?,0,?)""", (active_oid, ts(st)))
 
+    # 每个测试用户几条通知, 供用户端消息中心展示
+    notif_seeds = [
+        ('system',   '欢迎使用充电服务',   '完成首单可获得新人立减券一张', 0,  1, 12),
+        ('coupon',   '优惠券即将过期',     '您有 1 张满50减8 券将在3天后过期', 0, 0, 30),
+        ('order',    '订单已结算',         '感谢使用, 本次充电已结算完成',   0,  1, 6),
+        ('point',    '积分到账',           '本次充电获得积分, 可在积分商城使用', 0, 0, 5),
+        ('reservation', '排队提醒',        '您预约的电站已有空闲电桩',       0,  0, 2),
+    ]
+    for uid in range(1, 6):
+        for k, (ntype, title, content, rel, isread, hrs) in enumerate(notif_seeds):
+            if (uid + k) % 2 == 0:                       # 不是每人都全给, 免得千篇一律
+                continue
+            c.execute("""INSERT INTO notification(user_id,type,title,content,related_id,is_read,create_time)
+                         VALUES(?,?,?,?,NULL,?,?)""",
+                      (uid, ntype, title, content, isread, ts(NOW - timedelta(hours=hrs + uid))))
+
     # ---------- 时序测量 (近3天, 每15分钟, 基线+双峰正弦+噪声) ----------
     rows = []
     for cid, sid, typ, power in chargers:
@@ -285,11 +301,14 @@ def main():
                      VALUES(?,?,?,?,?,?,?)""", rows)
 
     # ---------- 天气 / 节假日 ----------
-    c.execute("INSERT INTO weather(area,condition,temperature,forecast,update_time) VALUES('','sunny',27,NULL,?)", (ts(NOW),))
-    for area, cond, temp in [("商业区","sunny",28),("高新区","cloudy",26),("大学城","sunny",27),
-                             ("老城区","cloudy",26),("滨河区","rain",24)]:
-        c.execute("INSERT INTO weather(area,condition,temperature,forecast,update_time) VALUES(?,?,?,NULL,?)",
-                  (area, cond, temp, ts(NOW)))
+    for area, cond, temp, fc in [("全市","sunny",27,"今日晴, 适合出行"),
+                                 ("商业区","sunny",28,"午后有短时云量增多"),
+                                 ("高新区","cloudy",26,"多云转晴, 无降水"),
+                                 ("大学城","sunny",27,"晴, 紫外线较强"),
+                                 ("老城区","cloudy",26,"多云, 体感舒适"),
+                                 ("滨河区","rain",24,"有小雨, 注意路面湿滑")]:
+        c.execute("INSERT INTO weather(area,condition,temperature,forecast,update_time) VALUES(?,?,?,?,?)",
+                  (area, cond, temp, fc, ts(NOW)))
     holidays = [("2026-01-01","元旦",0),("2026-02-16","春节",0),("2026-02-17","春节",0),("2026-02-18","春节",0),
                 ("2026-04-05","清明节",0),("2026-05-01","劳动节",0),("2026-06-19","端午节",0),
                 ("2026-09-25","中秋节",0),("2026-10-01","国庆节",0),("2026-10-02","国庆节",0),
@@ -298,11 +317,23 @@ def main():
         c.execute("INSERT INTO holiday(date,name,is_workday,create_time) VALUES(?,?,?,?)", (d, name, wk, ts(NOW)))
 
     # ---------- 套餐 / FAQ / 换电域 ----------
-    c.execute("""INSERT INTO member_plan(name,price,valid_days,service_fee_discount,night_discount,points_multiplier,status,description,create_time)
-                 VALUES('畅充月卡',19.9,30,0.8,0.9,1.5,'active','服务费8折, 夜间再9折, 1.5倍积分',?)""", (ts(NOW - timedelta(days=40)),))
+    for pname, price, days, svc, night, mult, desc in [
+        ('体验周卡',   5.9,   7, 0.90, 0.95, 1.2, '服务费9折, 夜间再95折, 1.2倍积分'),
+        ('畅充月卡',  19.9,  30, 0.80, 0.90, 1.5, '服务费8折, 夜间再9折, 1.5倍积分'),
+        ('畅充季卡',  49.9,  90, 0.75, 0.85, 1.8, '服务费75折, 夜间再85折, 1.8倍积分'),
+        ('畅充年卡', 168.0, 365, 0.70, 0.80, 2.0, '服务费7折, 夜间再8折, 双倍积分'),
+    ]:
+        c.execute("""INSERT INTO member_plan(name,price,valid_days,service_fee_discount,night_discount,
+                     points_multiplier,status,description,create_time) VALUES(?,?,?,?,?,?,'active',?,?)""",
+                  (pname, price, days, svc, night, mult, desc, ts(NOW - timedelta(days=40))))
     c.execute("""INSERT INTO user_plan(user_id,plan_id,start_time,end_time,status,create_time)
-                 VALUES(3,1,?,?,'active',?)""",
+                 VALUES(3,2,?,?,'active',?)""",
               (ts(NOW - timedelta(days=10)), ts(NOW + timedelta(days=20)), ts(NOW - timedelta(days=10))))
+    # 收藏: 几个测试用户各收藏 1-2 个站
+    for uid, sids in [(1,[1,3]), (2,[2]), (3,[1,5]), (4,[4])]:
+        for sid in sids:
+            c.execute("INSERT INTO favorite(user_id,station_id,create_time) VALUES(?,?,?)",
+                      (uid, sid, ts(NOW - timedelta(days=uid + sid))))
     faqs = [("充电","怎么开始充电?","在电站详情选择空闲电桩, 点击开始充电即可。",1),
             ("费用","电费怎么计算?","电费=分时电价×充电量, 谷/平/峰价格见电站详情。",2),
             ("账户","余额如何充值?","进入我的-钱包, 输入金额点击充值(模拟支付)。",3),

@@ -202,7 +202,7 @@ Item {
                 Rectangle {
                     id: memberRow
                     anchors.fill: parent
-                    anchors.leftMargin: 16; anchors.rightMargin: 16
+                    anchors.leftMargin: 16; anchors.rightMargin: 16; anchors.topMargin: 4; anchors.bottomMargin: 4
                     // 左侧：皇冠
                     Text {
                         id: crownTxt
