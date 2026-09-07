@@ -30,11 +30,13 @@ ChargerManagePage::ChargerManagePage(ApiClient* api, QWidget* parent)
     auto* pauseBtn = new QPushButton(QStringLiteral("暂停使用选中桩"));
     pauseBtn->setObjectName(QStringLiteral("dangerButton"));
     auto* addBtn = new QPushButton(QStringLiteral("新增充电桩"));
+    auto* logBtn = new QPushButton(QStringLiteral("查看操作日志"));
     auto* refreshBtn = new QPushButton(QStringLiteral("刷新"));
 
     auto* topRow = new QHBoxLayout;
     topRow->addWidget(title);
     topRow->addStretch();
+    topRow->addWidget(logBtn);
     topRow->addWidget(addBtn);
     topRow->addWidget(restartBtn);
     topRow->addWidget(pauseBtn);
@@ -63,11 +65,40 @@ ChargerManagePage::ChargerManagePage(ApiClient* api, QWidget* parent)
     connect(restartBtn, &QPushButton::clicked, this, &ChargerManagePage::onRestart);
     connect(pauseBtn, &QPushButton::clicked, this, &ChargerManagePage::onPause);
     connect(addBtn, &QPushButton::clicked, this, &ChargerManagePage::onAddCharger);
+    connect(logBtn, &QPushButton::clicked, this, &ChargerManagePage::onShowLogs);
     connect(refreshBtn, &QPushButton::clicked, this, &ChargerManagePage::refresh);
 
     refresh();
 }
 
+void ChargerManagePage::onShowLogs() {
+    const int row = m_table->currentRow();
+    if (row < 0) {
+        QMessageBox::information(this, QStringLiteral("提示"), QStringLiteral("请先选中一台充电桩"));
+        return;
+    }
+    const int chargerId = m_table->item(row, 0)->data(Qt::UserRole).toInt();
+    const QString code = m_table->item(row, 1)->text();
+    appendLog(QStringLiteral("查看 %1 的操作日志：").arg(code));
+    m_api->fetchDeviceLogs(chargerId,
+                           [this](int res, const QString&, const QJsonObject& payload) {
+        if (res != proto::code::Ok) {
+            return;
+        }
+        const QJsonArray logs = payload.value(QStringLiteral("logs")).toArray();
+        if (logs.isEmpty()) {
+            appendLog(QStringLiteral("（无操作日志）"));
+        }
+        for (const QJsonValue& lv : logs) {
+            const QJsonObject log = lv.toObject();
+            appendLog(QStringLiteral("%1 | %2 | %3 | %4")
+                          .arg(log.value(QStringLiteral("action")).toString(),
+                               log.value(QStringLiteral("op_time")).toString(),
+                               log.value(QStringLiteral("operator")).toString(),
+                               log.value(QStringLiteral("result")).toString()));
+        }
+    });
+}
 void ChargerManagePage::appendLog(const QString& text) {
     m_logView->append(QStringLiteral("[%1] %2")
                           .arg(QTime::currentTime().toString(QStringLiteral("HH:mm:ss")), text));

@@ -53,8 +53,6 @@ add_executable(admin_client
     src/ui/pages/StationManagePage.cpp
     src/ui/pages/UserManagePage.h
     src/ui/pages/UserManagePage.cpp
-    src/ui/pages/DeviceOpsPage.h
-    src/ui/pages/DeviceOpsPage.cpp
     src/ui/pages/DecisionPage.h
     src/ui/pages/DecisionPage.cpp
 )

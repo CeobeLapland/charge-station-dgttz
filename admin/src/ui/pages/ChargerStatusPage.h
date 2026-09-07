@@ -15,9 +15,12 @@ public:
 private:
     void refresh();
     void showTipText(const QString& text);
+    void showStatusChargers(const QString& statusKey, const QString& statusLabel);
+
     ApiClient* m_api = nullptr;
     QTableWidget* m_table = nullptr;
+    QTableWidget* m_riskTable = nullptr;
     QPieSeries* m_pieSeries = nullptr;
     QChartView* m_pieView = nullptr;
-    QLabel* m_tip = nullptr;   // 自绘气泡
+    QLabel* m_tip = nullptr;
 };

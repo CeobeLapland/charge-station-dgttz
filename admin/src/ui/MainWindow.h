@@ -9,7 +9,6 @@ class ApiClient;
 class ChargerManagePage;
 class ChargerStatusPage;
 class DecisionPage;
-class DeviceOpsPage;
 class SalesPage;
 class StationManagePage;
 class UserManagePage;
@@ -38,6 +37,5 @@ private:
     ChargerManagePage* m_chargerManagePage = nullptr;
     StationManagePage* m_stationManagePage = nullptr;
     UserManagePage* m_userManagePage = nullptr;
-    DeviceOpsPage* m_deviceOpsPage = nullptr;
     DecisionPage* m_decisionPage = nullptr;
 };
