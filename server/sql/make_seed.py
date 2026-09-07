@@ -9,6 +9,7 @@ make_seed.py — 建库 + 种子数据生成器
 要点: 历史订单/时序测量按「基线 + 早晚双峰 + 随机噪声」生成, 供负荷预测演示;
       余额/积分/流水/桩累计数等冗余字段全部按真实业务口径聚合回填, 保证跨表一致。
 """
+import json
 import math
 import os
 import random
@@ -30,6 +31,22 @@ def price_level_of(hour):
     if 17 <= hour < 21:     return "peak",   1.00
     return "flat", 0.70
 
+# ---------- 静态种子加载 (来自 seed_data.json) ----------
+def load_seed():
+    """读取同目录 seed_data.json, 返回解析后的 dict。
+
+    JSON 约定(详见文件顶部 _说明/_约定):
+      - 顶层及数据行内以 `_` 开头的键均为注释说明, 由 seed_rows() 剔除;
+      - 列表顺序即插入顺序 => 自增 id 从 1 递增, 不得调序;
+      - 外键用引用字段表达, 由调用方解析成真实 id。
+    """
+    with open(os.path.join(HERE, "seed_data.json"), encoding="utf-8") as f:
+        return json.load(f)
+
+def seed_rows(rows):
+    """剔除单行数据中的 `_` 注释字段, 返回纯净字段 dict 列表。"""
+    return [{k: v for k, v in r.items() if not k.startswith("_")} for r in rows]
+
 def main():
     if os.path.exists(DB):
         os.remove(DB)
@@ -38,109 +55,117 @@ def main():
     con.executescript(open(os.path.join(HERE, "schema.sql"), encoding="utf-8").read())
     c = con.cursor()
 
-    # ---------- 管理员 ----------
-    c.execute("INSERT INTO admin(account,password) VALUES('admin','123456')")
+    # ---------- 静态基础数据 (读取 seed_data.json) ----------
+    seed = load_seed()
 
-    # ---------- 商户 ----------
-    c.execute("""INSERT INTO merchant(name,contact_name,contact_phone,cooperation_type,status,remark,create_time)
-                 VALUES('绿能合作运营有限公司','李经理','13900001234','partner','active','大学城站合作方',?)""",
-              (ts(NOW - timedelta(days=90)),))
-    merchant_id = c.lastrowid
+    # 商户: 记录 name -> id, 供后文 station.merchant_ref 解析
+    merchant_id_by_name = {}
+    for s in seed_rows(seed["merchant"]):
+        c.execute("""INSERT INTO merchant(name,contact_name,contact_phone,cooperation_type,status,remark,create_time)
+                     VALUES(?,?,?,?,?,?,?)""",
+                  (s["name"], s["contact_name"], s["contact_phone"], s["cooperation_type"],
+                   s["status"], s["remark"], ts(NOW - timedelta(days=s["create_days_ago"]))))
+        merchant_id_by_name[s["name"]] = c.lastrowid
 
-    # ---------- 充电站 (5座, 覆盖不同区域/归属/设施, 1座换电) ----------
-    stations = [
-        # name, address, area, lng, lat, service_fee, parking_fee, hours, facilities, owner, merch, swap
-        ("市中心快充站", "解放路100号",   "商业区", 123.4310, 41.8057, 0.80, 5, "00:00-24:00",
-         '["convenience_store","wifi","rain_shelter"]', "self_run", None, 0),
-        ("高新软件园站", "创新路2号",     "高新区", 123.4587, 41.7423, 0.60, 0, "00:00-24:00",
-         '["washroom","rest_area","underground_parking"]', "self_run", None, 0),
-        ("大学城充电站", "文华街33号",    "大学城", 123.4123, 41.7669, 0.50, 0, "06:00-23:00",
-         '["washroom","convenience_store"]', "partner", merchant_id, 0),
-        ("老城区慢充站", "中山巷8号",     "老城区", 123.3958, 41.8121, 0.40, 2, "00:00-24:00",
-         '[]', "self_run", None, 0),
-        ("滨河换电综合站", "滨河大道66号", "滨河区", 123.4776, 41.7890, 0.70, 0, "00:00-24:00",
-         '["rest_area","wifi","rain_shelter","underground_parking"]', "self_run", None, 1),
-    ]
-    for s in stations:
+    # 充电站: facilities 以数组写入 JSON, 落库时转成 JSON 字符串;
+    #         merchant_ref(商户名或 null) 解析为 merchant_id
+    station_id_by_name = {}
+    for s in seed_rows(seed["station"]):
+        mid = merchant_id_by_name[s["merchant_ref"]] if s["merchant_ref"] else None
         c.execute("""INSERT INTO station(name,address,area,longitude,latitude,total_chargers,online_rate,
                      service_fee,parking_fee,business_hours,facilities,owner_type,merchant_id,has_swap)
                      VALUES(?,?,?,?,?,0,100,?,?,?,?,?,?,?)""",
-                  (s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7], s[8], s[9], s[10], s[11]))
+                  (s["name"], s["address"], s["area"], s["longitude"], s["latitude"], s["service_fee"],
+                   s["parking_fee"], s["business_hours"], json.dumps(s["facilities"], ensure_ascii=False),
+                   s["owner_type"], mid, s["has_swap"]))
+        station_id_by_name[s["name"]] = c.lastrowid
 
-    # ---------- 分时电价 (全站通用三档 + 2条专属站规则) ----------
-    for level, price, rng in [("valley",0.40,"00:00-08:00"),("flat",0.70,"08:00-17:00"),
-                              ("peak",1.00,"17:00-21:00"),("flat",0.70,"21:00-24:00")]:
-        c.execute("INSERT INTO price_rule(station_id,level,price,time_range) VALUES(NULL,?,?,?)",
-                  (level, price, rng))
-    c.execute("INSERT INTO price_rule(station_id,level,price,time_range) VALUES(3,'valley',0.35,'00:00-08:00')")  # 大学城谷价更低
-    c.execute("INSERT INTO price_rule(station_id,level,price,time_range) VALUES(1,'peak',1.20,'17:00-21:00')")    # 市中心峰价更高
+    # 分时电价: station_ref 为 null => 全站通用, 否则按电站名解析为专属站规则
+    for p in seed_rows(seed["price_rule"]):
+        sid = station_id_by_name[p["station_ref"]] if p["station_ref"] else None
+        c.execute("INSERT INTO price_rule(station_id,level,price,time_range) VALUES(?,?,?,?)",
+                  (sid, p["level"], p["price"], p["time_range"]))
 
-    # ---------- 充电桩 (每站10台, 快慢混合, 全场共2台故障) ----------
-    chargers = []          # (id, station_id, type, power)
-    fault_assigned = [(1, 7), (4, 3)]      # (station_id, 第n台) 设为故障
-    for sid in range(1, 6):
-        for i in range(1, 11):
-            typ   = "fast" if i <= 6 else "slow"
+    # 管理员
+    for a in seed_rows(seed["admin"]):
+        c.execute("INSERT INTO admin(account,password) VALUES(?,?)", (a["account"], a["password"]))
+
+    # ---------- 充电桩: 按每站 charger_count 台动态生成 (快慢混合, 前两站各留1台故障演示) ----------
+    # station_cfg: 有序 [ (station_id, name, charger_count) ], 供桩编码前缀与计数回填
+    station_cfg = [(station_id_by_name[s["name"]], s["name"], int(s.get("charger_count", 10)))
+                   for s in seed_rows(seed["station"])]
+    chargers = []             # (id, station_id, type, power)
+    charger_ref = {}          # (station_id, 第n台) -> charger_id, 供故障/告警引用
+    fault_assigned = []       # 演示用故障桩: [(station_id, 第n台)]
+    for (sid, _nm, cps), is_fault in zip(station_cfg, [True, True] + [False] * len(station_cfg)):
+        if is_fault and cps >= 3:
+            fault_assigned.append((sid, cps - 3))
+    for pos, (sid, _nm, cps) in enumerate(station_cfg, 1):
+        fast_n = min(6, max(1, cps // 2 + 1))          # 快充约一半(上限6), 其余慢充
+        for i in range(1, cps + 1):
+            typ   = "fast" if i <= fast_n else "slow"
             power = random.choice([120, 90, 60]) if typ == "fast" else 7
             status = "idle"
             fault_code, comm, health = "", "normal", random.randint(88, 100)
             if (sid, i) in fault_assigned:
                 status, fault_code, comm, health = "fault", "E-0301", "abnormal", random.randint(35, 55)
             # 状态分布多样化: 管理端首页的状态环形图/大屏需要 idle 以外的样本,
-            # 否则演示时 50 台桩全是 idle, 图形毫无信息量。
+            # 否则所有桩全是 idle, 图形毫无信息量。
             elif (sid + i) % 7 == 0:
                 status, health = "charging", random.randint(75, 95)
             elif (sid + i) % 11 == 0:
                 status = "reserved"
-            elif i == 10 and sid % 2 == 1:
+            elif i == cps and pos % 2 == 1:
                 status, comm, health = "offline", "abnormal", random.randint(60, 80)
             c.execute("""INSERT INTO charger(code,station_id,type,power,status,voltage,current,temperature,
                          fault_code,comm_status,health_score,total_charge_count,total_charge_duration,created_time)
                          VALUES(?,?,?,?,?,0,0,?,?,?,?,0,0,?)""",
-                      (f"{chr(64+sid)}-{i:03d}", sid, typ, power, status,
+                      (f"{chr(64+pos)}-{i:03d}", sid, typ, power, status,
                        round(random.uniform(22, 28), 1), fault_code, comm, health,
                        ts(NOW - timedelta(days=random.randint(200, 600)))))
+            charger_ref[(sid, i)] = c.lastrowid
             chargers.append((c.lastrowid, sid, typ, power))
-    c.execute("UPDATE station SET total_chargers=10")
-    c.execute("UPDATE station SET online_rate=90 WHERE id IN (1,4)")   # 各有1台故障 → 9/10
+    # 每站桩数回填; 有故障桩的站 → 在线率=(桩数-1)/桩数, 其余 100
+    for sid, _nm, cps in station_cfg:
+        c.execute("UPDATE station SET total_chargers=?, online_rate=? WHERE id=?",
+                  (cps, 100, sid))
+    for f_sid, _f_i in fault_assigned:
+        cps = next(c for s_sid, _n, c in station_cfg if s_sid == f_sid)
+        c.execute("UPDATE station SET online_rate=? WHERE id=?",
+                  (round((cps-1)/cps*100), f_sid))
 
-    # ---------- 用户 (5个) 与车辆 ----------
-    users = [
-        ("13800000001", "用户0001", 120.0), ("13800000002", "早高峰通勤者", 60.0),
-        ("13800000003", "用户0003", 200.0), ("13800000004", "夜猫子网约车", 30.0),
-        ("13800000005", "用户0005", 88.8),
-    ]
-    for i, (phone, nick, _bal) in enumerate(users, 1):
+    # ---------- 用户 与 车辆 ----------
+    # 用户: level 取自 JSON(vip 用于权益演示); register_time 保持随机(半动态, 不搬进 JSON)
+    user_id_by_phone = {}
+    for s in seed_rows(seed["user"]):
         c.execute("""INSERT INTO user(phone,nickname,avatar_path,balance,points,level,status,register_time)
                      VALUES(?,?,'',0,0,?, 'normal', ?)""",
-                  (phone, nick, "vip" if i == 3 else "normal",
+                  (s["phone"], s["nickname"], s["level"],
                    ts(NOW - timedelta(days=random.randint(30, 120)))))
-    vehicles = [
-        (1, "我的比亚迪", "car", 60, "dc_gb", 120, 1), (1, "买菜小车", "car", 30, "ac_gb", 7, 0),
-        (2, "通勤电车",   "car", 75, "dc_gb", 150, 1),
-        (3, "公司货车",   "light_truck", 100, "dc_gb", 120, 1),
-        (4, "网约车",     "car", 60, "dc_gb", 90, 1),
-        (5, "小电驴",     "two_wheeler", 2, "ac_gb", 0.5, 1),
-    ]
-    for v in vehicles:
+        user_id_by_phone[s["phone"]] = c.lastrowid
+    user_ids = list(user_id_by_phone.values())   # 有序用户id, 供订单/回填等按 JSON 数量动态驱动
+    # 车辆: user_ref(手机号) 解析为 user_id
+    for v in seed_rows(seed["vehicle"]):
         c.execute("""INSERT INTO vehicle(user_id,name,type,battery_kwh,connector_type,max_power_kw,is_default,created_time)
-                     VALUES(?,?,?,?,?,?,?,?)""", v + (ts(NOW - timedelta(days=25)),))
+                     VALUES(?,?,?,?,?,?,?,?)""",
+                  (user_id_by_phone[v["user_ref"]], v["name"], v["type"], v["battery_kwh"],
+                   v["connector_type"], v["max_power_kw"], v["is_default"], ts(NOW - timedelta(days=25))))
 
     # ---------- 优惠券模板 + 发券 ----------
-    c.execute("""INSERT INTO coupon(title,type,discount_amount,min_amount,station_id,time_range,valid_days,total,status,create_time)
-                 VALUES('新人立减5元','new_user',5,0,NULL,'',30,-1,'active',?)""", (ts(NOW - timedelta(days=60)),))
-    c.execute("""INSERT INTO coupon(title,type,discount_amount,min_amount,station_id,time_range,valid_days,total,status,create_time)
-                 VALUES('满50减8','full_reduction',8,50,NULL,'',15,500,'active',?)""", (ts(NOW - timedelta(days=30)),))
-    c.execute("""INSERT INTO coupon(title,type,discount_amount,min_amount,station_id,time_range,valid_days,total,status,create_time)
-                 VALUES('夜间充电券','night',3,0,NULL,'22:00-06:00',30,-1,'active',?)""", (ts(NOW - timedelta(days=30)),))
-    for uid in range(1, 6):   # 每人一张未用的新人券
+    # 注意: 下方发券逻辑硬编码 coupon_id=1(新人券), 故 JSON 中 coupon 列表顺序不可调(第一张=新人立减5元)
+    for cp in seed_rows(seed["coupon"]):
+        c.execute("""INSERT INTO coupon(title,type,discount_amount,min_amount,station_id,time_range,valid_days,total,status,create_time)
+                     VALUES(?,?,?,?,NULL,?,?,?,?,?)""",
+                  (cp["title"], cp["type"], cp["discount_amount"], cp["min_amount"], cp["time_range"],
+                   cp["valid_days"], cp["total"], cp["status"], ts(NOW - timedelta(days=cp["create_days_ago"]))))
+    for uid in user_id_by_phone.values():   # 每个用户一张未用的新人券
         c.execute("""INSERT INTO user_coupon(user_id,coupon_id,status,receive_time)
                      VALUES(?,1,'unused',?)""", (uid, ts(NOW - timedelta(days=20))))
 
     # ---------- 历史订单 (近30天, 早晚双峰) + 流水/积分/时间轴 ----------
     hour_weight = [1,1,1,1,1,2,4,8,10,7,4,3,3,3,4,5,8,10,9,6,4,3,2,1]   # 双峰权重
-    balances = {i: 0.0 for i in range(1, 6)}
-    points   = {i: 0   for i in range(1, 6)}
+    balances = {uid: 0.0 for uid in user_ids}
+    points   = {uid: 0   for uid in user_ids}
     charger_stat = {cid: [0, 0] for cid, *_ in chargers}                 # cid -> [次数, 分钟]
     order_rows = 0
     # day=0 即"今天": 必须有订单, 否则管理端首页的"今日营收"永远是 0
@@ -153,7 +178,7 @@ def main():
             hour = random.choices(range(24), weights=hour_weight)[0]
             if day == 0:
                 hour = random.randrange(0, max(1, NOW.hour))   # 今天的订单只能发生在已过去的小时里
-            uid  = random.randint(1, 5)
+            uid  = random.choice(user_ids)
             cid, sid, typ, power = random.choice(chargers)
             dur  = random.randint(40, 90) if typ == "fast" else random.randint(120, 300)
             start = base.replace(hour=hour, minute=random.randint(0, 59))
@@ -196,12 +221,12 @@ def main():
     for cid, (cnt, mins) in charger_stat.items():
         c.execute("UPDATE charger SET total_charge_count=?, total_charge_duration=? WHERE id=?", (cnt, mins, cid))
     # 用户余额/积分回填
-    for uid in range(1, 6):
+    for uid in user_ids:
         c.execute("UPDATE user SET balance=?, points=?, last_login_time=? WHERE id=?",
                   (balances[uid], points[uid], ts(NOW - timedelta(hours=random.randint(1, 48))), uid))
 
     # ---------- 一笔"充电中"未结算订单 (演示强制结算流程) ----------
-    cid, sid, typ, power = next(x for x in chargers if x[2] == "fast" and x[1] == 2)
+    cid, sid, typ, power = next(x for x in chargers if x[2] == "fast")
     st = NOW - timedelta(minutes=35)
     c.execute("""INSERT INTO charging_order(user_id,station_id,charger_id,vehicle_id,status,start_soc,target_soc,
                  start_time,duration_min,energy_kwh,price_level,amount,discount_amount,pay_amount,
@@ -215,9 +240,11 @@ def main():
                   (active_oid, node, label, ts(st + timedelta(minutes=mins))))
 
     # ---------- 评价 / 工单 / 告警 / 设备日志 / 通知 ----------
+    station_ids = [sid for sid, _nm, _c in station_cfg]
+    station_name = {sid: nm for sid, nm, _c in station_cfg}          # 供通知文案引用站名
     tags_pool = ["fast_charge","spacious","quiet_night","good_service","good_fast_charge","heavy_queue"]
     for _ in range(12):
-        uid, sid = random.randint(1, 5), random.randint(1, 5)
+        uid, sid = random.choice(user_ids), random.choice(station_ids)
         base = round(random.uniform(3.5, 5.0), 1)
         c.execute("""INSERT INTO review(user_id,station_id,order_id,overall_score,speed_score,device_score,
                      parking_score,hygiene_score,service_score,tags,content,useful_count,status,create_time)
@@ -227,18 +254,36 @@ def main():
                    str([random.choice(tags_pool), random.choice(tags_pool)]).replace("'", '"'),
                    "充电速度不错，位置好找。", random.randint(0, 8),
                    ts(NOW - timedelta(days=random.randint(1, 25)))))
-    c.execute("""INSERT INTO work_order(type,priority,user_id,station_id,charger_id,title,description,status,handler,create_time)
-                 VALUES('device_fault','high',NULL,1,7,'A-007桩通信异常','桩自检报E-0301, 远程重启无效','processing','admin',?)""",
-              (ts(NOW - timedelta(days=1)),))
-    c.execute("""INSERT INTO work_order(type,priority,user_id,station_id,charger_id,title,description,status,handler,create_time)
-                 VALUES('user_complaint','medium',2,3,NULL,'停车费争议','充电结束后被收停车费, 请核实','pending','',?)""",
-              (ts(NOW - timedelta(hours=6)),))
-    c.execute("""INSERT INTO alarm(charger_id,station_id,type,level,occur_time,status,handle_action)
-                 VALUES(7,1,'comm_abnormal','critical',?,'open','')""", (ts(NOW - timedelta(days=1, hours=2)),))
-    c.execute("""INSERT INTO alarm(charger_id,station_id,type,level,occur_time,status,handle_action)
-                 VALUES(33,4,'offline','warning',?,'handled','repair')""", (ts(NOW - timedelta(days=3)),))
-    c.execute("""INSERT INTO device_log(charger_id,action,operator,op_time,result)
-                 VALUES(7,'restart','admin',?,'failed')""", (ts(NOW - timedelta(days=1, hours=1)),))
+    # 故障桩演示: 工单/告警/设备日志引用前两处故障桩, 保证 FK 一致
+    def _fault_charger(idx):
+        if idx < len(fault_assigned):
+            return fault_assigned[idx]
+        return None
+    f0 = _fault_charger(0)
+    if f0:
+        f0_sid, f0_i = f0
+        f0_cid = charger_ref[(f0_sid, f0_i)]
+        c.execute("""INSERT INTO work_order(type,priority,user_id,station_id,charger_id,title,description,status,handler,create_time)
+                     VALUES('device_fault','high',NULL,?,?,?,?,?,?,?)""",
+                  (f0_sid, f0_cid, f"{chr(64+station_ids.index(f0_sid)+1)}-{f0_i:03d}桩通信异常",
+                   '桩自检报E-0301, 远程重启无效',
+                   'processing', 'admin', ts(NOW - timedelta(days=1))))
+        c.execute("""INSERT INTO alarm(charger_id,station_id,type,level,occur_time,status,handle_action)
+                     VALUES(?,?,'comm_abnormal','critical',?,'open','')""",
+                  (f0_cid, f0_sid, ts(NOW - timedelta(days=1, hours=2))))
+        c.execute("""INSERT INTO device_log(charger_id,action,operator,op_time,result)
+                     VALUES(?,'restart','admin',?,'failed')""", (f0_cid, ts(NOW - timedelta(days=1, hours=1))))
+    if len(user_ids) > 1 and len(station_ids) > 2:
+        c.execute("""INSERT INTO work_order(type,priority,user_id,station_id,charger_id,title,description,status,handler,create_time)
+                     VALUES('user_complaint','medium',?,?,NULL,'停车费争议','充电结束后被收停车费, 请核实','pending','',?)""",
+                  (user_ids[1], station_ids[2], ts(NOW - timedelta(hours=6))))
+    f1 = _fault_charger(1)
+    if f1:
+        f1_sid, f1_i = f1
+        f1_cid = charger_ref[(f1_sid, f1_i)]
+        c.execute("""INSERT INTO alarm(charger_id,station_id,type,level,occur_time,status,handle_action)
+                     VALUES(?,?,'offline','warning',?,'handled','repair')""",
+                  (f1_cid, f1_sid, ts(NOW - timedelta(days=3))))
     # 近 7 日注册的散户: 大屏"用户增长"曲线需要样本, 否则 7 天全是 0。
     # 这些用户不下单, 只用于增长曲线; 主测试账号仍是 13800000001~5。
     for k in range(15):
@@ -251,36 +296,43 @@ def main():
                    ts(NOW - timedelta(days=d_ago, hours=random.randint(0, 5)))))
 
     # 大屏告警面板需要多几条不同级别/类型的样本, 否则只有两行, 演示时很空
-    for a_cid, a_sid, a_type, a_lvl, a_hrs, a_status in [
-        (10, 1, 'overheat',      'critical', 3,  'open'),
-        (21, 3, 'power_drop',    'warning',  6,  'open'),
-        (41, 5, 'offline',       'warning',  9,  'handled'),
-        (15, 2, 'user_behavior', 'info',     14, 'handled'),
-        (30, 3, 'comm_abnormal', 'warning',  20, 'open'),
+    # 按站取若干块桩制造告警: 每站取前若干个充电桩 id, 保证 FK 一致
+    chargers_by_station = {}
+    for cid, sid, _typ, _pw in chargers:
+        chargers_by_station.setdefault(sid, []).append(cid)
+    for st_seq, a_type, a_lvl, a_hrs, a_status in [
+        (0, 'overheat',      'critical', 3,  'open'),
+        (2, 'power_drop',    'warning',  6,  'open'),
+        (4, 'offline',       'warning',  9,  'handled'),
+        (1, 'user_behavior', 'info',     14, 'handled'),
+        (2, 'comm_abnormal', 'warning',  20, 'open'),
     ]:
+        if st_seq >= len(station_cfg):
+            continue
+        sid = station_cfg[st_seq][0]
+        pool = chargers_by_station.get(sid, [])
+        if not pool:
+            continue
+        a_cid = pool[-1]                          # 取该站最末一台桩做告警样本
         c.execute("""INSERT INTO alarm(charger_id,station_id,type,level,occur_time,status,handle_action)
                      VALUES(?,?,?,?,?,?,?)""",
-                  (a_cid, a_sid, a_type, a_lvl, ts(NOW - timedelta(hours=a_hrs)), a_status,
+                  (a_cid, sid, a_type, a_lvl, ts(NOW - timedelta(hours=a_hrs)), a_status,
                    'repair' if a_status == 'handled' else ''))
 
     c.execute("""INSERT INTO notification(user_id,type,title,content,related_id,is_read,create_time)
-                 VALUES(1,'order','充电进行中','您在高新软件园站的充电已开始',?,0,?)""", (active_oid, ts(st)))
+                 VALUES(1,'order','充电进行中',?,?,0,?)""",
+              (f"您正在 {station_name[sid]} 充电", active_oid, ts(st)))
 
-    # 每个测试用户几条通知, 供用户端消息中心展示
-    notif_seeds = [
-        ('system',   '欢迎使用充电服务',   '完成首单可获得新人立减券一张', 0,  1, 12),
-        ('coupon',   '优惠券即将过期',     '您有 1 张满50减8 券将在3天后过期', 0, 0, 30),
-        ('order',    '订单已结算',         '感谢使用, 本次充电已结算完成',   0,  1, 6),
-        ('point',    '积分到账',           '本次充电获得积分, 可在积分商城使用', 0, 0, 5),
-        ('reservation', '排队提醒',        '您预约的电站已有空闲电桩',       0,  0, 2),
-    ]
-    for uid in range(1, 6):
-        for k, (ntype, title, content, rel, isread, hrs) in enumerate(notif_seeds):
+    # 每个测试用户几条通知, 供用户端消息中心展示 (文案来自 JSON notif_seed)
+    notif_seeds = seed_rows(seed["notif_seed"])
+    for uid in user_ids:
+        for k, n in enumerate(notif_seeds):
             if (uid + k) % 2 == 0:                       # 不是每人都全给, 免得千篇一律
                 continue
             c.execute("""INSERT INTO notification(user_id,type,title,content,related_id,is_read,create_time)
                          VALUES(?,?,?,?,NULL,?,?)""",
-                      (uid, ntype, title, content, isread, ts(NOW - timedelta(hours=hrs + uid))))
+                      (uid, n["type"], n["title"], n["content"], n["is_read"],
+                       ts(NOW - timedelta(hours=n["hours_ago"] + uid))))
 
     # ---------- 时序测量 (近3天, 每15分钟, 基线+双峰正弦+噪声) ----------
     rows = []
@@ -300,65 +352,62 @@ def main():
     c.executemany("""INSERT INTO charging_measure(charger_id,station_id,measure_time,power_kw,soc,energy_delta_kwh,temperature)
                      VALUES(?,?,?,?,?,?,?)""", rows)
 
-    # ---------- 天气 / 节假日 ----------
-    for area, cond, temp, fc in [("全市","sunny",27,"今日晴, 适合出行"),
-                                 ("商业区","sunny",28,"午后有短时云量增多"),
-                                 ("高新区","cloudy",26,"多云转晴, 无降水"),
-                                 ("大学城","sunny",27,"晴, 紫外线较强"),
-                                 ("老城区","cloudy",26,"多云, 体感舒适"),
-                                 ("滨河区","rain",24,"有小雨, 注意路面湿滑")]:
+    # ---------- 天气 / 节假日 (来自 JSON) ----------
+    for w in seed_rows(seed["weather"]):
         c.execute("INSERT INTO weather(area,condition,temperature,forecast,update_time) VALUES(?,?,?,?,?)",
-                  (area, cond, temp, fc, ts(NOW)))
-    holidays = [("2026-01-01","元旦",0),("2026-02-16","春节",0),("2026-02-17","春节",0),("2026-02-18","春节",0),
-                ("2026-04-05","清明节",0),("2026-05-01","劳动节",0),("2026-06-19","端午节",0),
-                ("2026-09-25","中秋节",0),("2026-10-01","国庆节",0),("2026-10-02","国庆节",0),
-                ("2026-10-03","国庆节",0),("2026-09-27","国庆调休上班",1)]
-    for d, name, wk in holidays:
-        c.execute("INSERT INTO holiday(date,name,is_workday,create_time) VALUES(?,?,?,?)", (d, name, wk, ts(NOW)))
+                  (w["area"], w["condition"], w["temperature"], w["forecast"], ts(NOW)))
+    for h in seed_rows(seed["holiday"]):
+        c.execute("INSERT INTO holiday(date,name,is_workday,create_time) VALUES(?,?,?,?)",
+                  (h["date"], h["name"], h["is_workday"], ts(NOW)))
 
     # ---------- 套餐 / FAQ / 换电域 ----------
-    for pname, price, days, svc, night, mult, desc in [
-        ('体验周卡',   5.9,   7, 0.90, 0.95, 1.2, '服务费9折, 夜间再95折, 1.2倍积分'),
-        ('畅充月卡',  19.9,  30, 0.80, 0.90, 1.5, '服务费8折, 夜间再9折, 1.5倍积分'),
-        ('畅充季卡',  49.9,  90, 0.75, 0.85, 1.8, '服务费75折, 夜间再85折, 1.8倍积分'),
-        ('畅充年卡', 168.0, 365, 0.70, 0.80, 2.0, '服务费7折, 夜间再8折, 双倍积分'),
-    ]:
+    # 会员套餐 (来自 JSON; 注意下列 user_plan 取 vip 用户 + plan_id=2=畅充月卡, JSON 顺序不可调)
+    for p in seed_rows(seed["member_plan"]):
         c.execute("""INSERT INTO member_plan(name,price,valid_days,service_fee_discount,night_discount,
                      points_multiplier,status,description,create_time) VALUES(?,?,?,?,?,?,'active',?,?)""",
-                  (pname, price, days, svc, night, mult, desc, ts(NOW - timedelta(days=40))))
+                  (p["name"], p["price"], p["valid_days"], p["service_fee_discount"], p["night_discount"],
+                   p["points_multiplier"], p["description"], ts(NOW - timedelta(days=40))))
+    # vip 用户开一张月卡 (plan_id=2); 从 JSON 找升级的 vip 用户
+    vip_uid = next((uid for uid in user_ids if uid == user_id_by_phone.get(
+        next(s["phone"] for s in seed_rows(seed["user"]) if s["level"] == "vip"), -1)), user_ids[0])
     c.execute("""INSERT INTO user_plan(user_id,plan_id,start_time,end_time,status,create_time)
-                 VALUES(3,2,?,?,'active',?)""",
-              (ts(NOW - timedelta(days=10)), ts(NOW + timedelta(days=20)), ts(NOW - timedelta(days=10))))
-    # 收藏: 几个测试用户各收藏 1-2 个站
-    for uid, sids in [(1,[1,3]), (2,[2]), (3,[1,5]), (4,[4])]:
-        for sid in sids:
+                 VALUES(?,2,?,?,'active',?)""",
+              (vip_uid, ts(NOW - timedelta(days=10)), ts(NOW + timedelta(days=20)), ts(NOW - timedelta(days=10))))
+    # 收藏: 前几个测试用户各收藏 1-2 个站 (站点取自 JSON 列表)
+    for k, uid in enumerate(user_ids[:4]):
+        sid_k = station_ids[k % len(station_ids)]                 # 收藏"自己站序"对应的站
+        sid_2 = station_ids[(k + 2) % len(station_ids)]           # 再收藏一个跨区域站
+        for sid in ({sid_k, sid_2}):
             c.execute("INSERT INTO favorite(user_id,station_id,create_time) VALUES(?,?,?)",
                       (uid, sid, ts(NOW - timedelta(days=uid + sid))))
-    faqs = [("充电","怎么开始充电?","在电站详情选择空闲电桩, 点击开始充电即可。",1),
-            ("费用","电费怎么计算?","电费=分时电价×充电量, 谷/平/峰价格见电站详情。",2),
-            ("账户","余额如何充值?","进入我的-钱包, 输入金额点击充值(模拟支付)。",3),
-            ("故障","电桩启动失败怎么办?","请换桩重试, 并在我的-工单提交故障反馈。",4)]
-    for cat, q_, a_, srt in faqs:
+    # FAQ (来自 JSON)
+    for f in seed_rows(seed["faq"]):
         c.execute("INSERT INTO faq(category,question,answer,sort,enabled,create_time) VALUES(?,?,?,?,1,?)",
-                  (cat, q_, a_, srt, ts(NOW)))
-    for i in range(1, 13):    # 滨河换电站(id=5) 12块电池
-        c.execute("""INSERT INTO battery(code,station_id,soc,health_score,temperature,status,swap_count,create_time)
-                     VALUES(?,5,?,?,?,?,?,?)""",
-                  (f"BAT-{i:03d}", round(random.uniform(20, 100), 1), random.randint(80, 100),
-                   round(random.uniform(22, 30), 1),
-                   "charging" if i <= 3 else "idle", random.randint(0, 60), ts(NOW - timedelta(days=100))))
-    c.execute("""INSERT INTO swap_order(user_id,station_id,battery_in_id,battery_out_id,amount,status,create_time)
-                 VALUES(4,5,1,5,35.0,'completed',?)""", (ts(NOW - timedelta(days=2)),))
-    c.execute("""INSERT INTO wallet_transaction(user_id,type,amount,balance_after,order_id,remark,create_time)
-                 VALUES(4,'consume',-35.0,?, NULL,'换电',?)""",
-              (round(balances[4] - 35.0, 2), ts(NOW - timedelta(days=2))))
-    c.execute("UPDATE user SET balance=balance-35.0 WHERE id=4")
-    # 商户汇总回填 (大学城站=3)
+                  (f["category"], f["question"], f["answer"], f["sort"], ts(NOW)))
+    # ---------- 换电域: 给"换电站"(has_swap=1) 造 12 块电池 + 1 笔换电订单 ----------
+    swap_sid = next((station_id_by_name[s["name"]] for s in seed_rows(seed["station"]) if s.get("has_swap")), None)
+    swap_uid = user_ids[-1] if len(user_ids) > 1 else user_ids[0]    # 用最后一个测试用户演示换电
+    if swap_sid is not None:
+        for i in range(1, 13):
+            c.execute("""INSERT INTO battery(code,station_id,soc,health_score,temperature,status,swap_count,create_time)
+                         VALUES(?,?,?,?,?,?,?,?)""",
+                      (f"BAT-{i:03d}", swap_sid, round(random.uniform(20, 100), 1), random.randint(80, 100),
+                       round(random.uniform(22, 30), 1),
+                       "charging" if i <= 3 else "idle", random.randint(0, 60), ts(NOW - timedelta(days=100))))
+        c.execute("""INSERT INTO swap_order(user_id,station_id,battery_in_id,battery_out_id,amount,status,create_time)
+                     VALUES(?,?,1,5,35.0,'completed',?)""", (swap_uid, swap_sid, ts(NOW - timedelta(days=2))))
+        c.execute("""INSERT INTO wallet_transaction(user_id,type,amount,balance_after,order_id,remark,create_time)
+                     VALUES(?,'consume',-35.0,?, NULL,'换电',?)""",
+                  (swap_uid, round(balances[swap_uid] - 35.0, 2), ts(NOW - timedelta(days=2))))
+        c.execute("UPDATE user SET balance=balance-35.0 WHERE id=?", (swap_uid,))
+    # 商户汇总回填: 取"合作运营"(merchant_ref 非空) 的那座站
+    partner_sid = next((station_id_by_name[s["name"]] for s in seed_rows(seed["station"])
+                        if s.get("merchant_ref") and station_id_by_name.get(s["name"])), 1)
     c.execute("""UPDATE merchant SET
-                 order_count=(SELECT COUNT(*) FROM charging_order WHERE station_id=3),
-                 settle_amount=IFNULL((SELECT ROUND(SUM(pay_amount),2) FROM charging_order WHERE station_id=3 AND status='completed'),0),
-                 service_score=IFNULL((SELECT ROUND(AVG(overall_score),2) FROM review WHERE station_id=3),0)
-                 WHERE id=1""")
+                 order_count=(SELECT COUNT(*) FROM charging_order WHERE station_id=?),
+                 settle_amount=IFNULL((SELECT ROUND(SUM(pay_amount),2) FROM charging_order WHERE station_id=? AND status='completed'),0),
+                 service_score=IFNULL((SELECT ROUND(AVG(overall_score),2) FROM review WHERE station_id=?),0)
+                 WHERE id=1""", (partner_sid, partner_sid, partner_sid))
 
     con.commit()
     # ---------- 自检 ----------

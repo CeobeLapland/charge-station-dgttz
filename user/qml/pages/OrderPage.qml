@@ -21,6 +21,11 @@ Item {
         target: UserData
         function onOrdersChanged() { root.allOrders = UserData.orders() }
     }
+    // 在线支付失败（余额不足/状态不允许等）统一经 ChargingFlow.abnormal 反馈
+    Connections {
+        target: ChargingFlow
+        function onAbnormal(title, sub) { root.showToast(title + "：" + sub) }
+    }
 
     function statusText(s) {
         if (s === "reserved")       return qsTr("预约中")
@@ -475,13 +480,20 @@ Item {
                 MouseArea {
                     anchors.fill: parent
                     onClicked: {
-                        // 模拟从余额扣款：余额足够 → 支付成功（转 completed），否则提示充值
+                        // 在线：交给服务端结算（order.settle_resp 回写订单/余额/积分，ordersChanged 自动刷新）。
+                        // 必须先清掉服务端库里的待结算订单，否则扫码后 order.create 仍会被 2001 拦截。
+                        if (backend.isConnected()) {
+                            backend.sendMap("order.settle", { order_id: Number(order.id) })
+                            showToast(qsTr("支付中，请稍候…"))
+                            root.selectedOrderId = 0
+                            return
+                        }
+                        // 离线：本地 mock，余额足够 → 支付成功（转 completed），否则提示充值
                         var pay = Number(order.pay_amount || 0)
                         var bal = Number(UserData.profile().balance || 0)
                         if (bal >= pay) {
                             if (UserData.recharge(-pay)) {
                                 // 回写订单为已完成：订单页随 ordersChanged 自动刷新，待支付账单即时消失
-                                // （真实场景由 order.settle_resp → ingestOrder 处理，这里本地直改保持一致）
                                 var o = {}
                                 for (var k in order) o[k] = order[k]
                                 o.status = "completed"

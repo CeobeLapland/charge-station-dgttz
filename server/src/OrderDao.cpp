@@ -256,6 +256,16 @@ std::optional<ReservationView> joinQueue(int userId, int stationId, OpError *err
         fail(err, 4001, QStringLiteral("电站不存在: id=%1").arg(stationId));
         return std::nullopt;
     }
+    // 规则: 有未结算/进行中的充电订单时不能预约 —— 与 createOrder 的 2001 同规则,
+    // 在预约阶段就拦下来, 而不是等扫码下单时才报错
+    const double active = scalarOf(
+        QStringLiteral("SELECT COUNT(*) FROM charging_order WHERE user_id=? "
+                       "AND status IN ('reserved','pending_settle')"),
+        {userId});
+    if (active > 0) {
+        fail(err, 2001, QStringLiteral("您有未完成的充电订单, 请先完成或取消"));
+        return std::nullopt;
+    }
     // 幂等: 同一个人在同一个站重复加入, 直接返回已有的那条, 不重复排号
     QSqlQuery ex;
     ex.prepare(QStringLiteral(

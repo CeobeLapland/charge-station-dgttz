@@ -65,6 +65,21 @@ void ChargingFlow::startCharge(int stationId, const QString& reserveType,
     m_progressTimer.stop();
     m_occupyTimer.stop();
 
+    // 级联拦截（先于预约请求）：有未完成订单（待结算/已预约）时不能再次预约。
+    // 与服务端 joinQueue/createOrder 的 2001 规则一致；这里在用户端提前提示，避免扫码后才报错。
+    if (m_user) {
+        const QVariantList all = m_user->orders();
+        for (const QVariant& v : all) {
+            const QString st = v.toMap().value(QStringLiteral("status")).toString();
+            if (st == QStringLiteral("pending_settle")
+                || st == QStringLiteral("reserved")) {
+                emit abnormal(QStringLiteral("您有未付款账单"),
+                              QStringLiteral("请先完成结算后再预约"));
+                return;
+            }
+        }
+    }
+
     const QVariantMap st = m_explore ? m_explore->stationById(stationId) : QVariantMap();
     QVariantMap vehicle;
     if (m_user) {
@@ -790,6 +805,10 @@ void ChargingFlow::handleOrderFinished(const QVariantMap& order) {
 
 // —— order.settle_resp：结算成功 ——
 void ChargingFlow::handleOrderSettled(const QVariantMap& order, const QVariantMap& extra) {
+    // 订单页直接结算历史账单（非当前流程订单）时，不回写流程状态；
+    // 当前流程结算（ChargingFlow.settle → order.settle）的订单 id 一定等于 m_orderId
+    if (m_orderId <= 0 || order.value(QStringLiteral("id")).toInt() != m_orderId)
+        return;
     m_occupyTimer.stop();
     applyOrderToFlow(order);
     if (extra.contains(QStringLiteral("points")))
