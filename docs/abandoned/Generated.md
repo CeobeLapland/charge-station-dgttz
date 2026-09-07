@@ -1,4 +1,4 @@
-cmake --build build -j && ./build/charge_user_client
+cmake --build build -j 2 && ./build/charge_user_client
 
 
 
@@ -18,3 +18,18 @@ QQmlComponent: Component is not ready
 js: Uncaught TypeError: Cannot read property 'lng' of undefined
 js: Uncaught Error: Attempting to run(), but is already running.
 qrc:/UserClient/qml/pages/HomePage.qml:130: TypeError: Cannot call method 'mapTilePresetsJson' of null
+
+
+
+
+
+
+
+
+这次的：
+qrc:/UserClient/qml/pages/StationDetailPage.qml:550:17: QML Column: possible QQuickItem::polish() loop
+qrc:/UserClient/qml/pages/StationDetailPage.qml:550:17: QML Column: Column called polish() inside updatePolish() of Column
+qrc:/UserClient/qml/pages/ExplorePage.qml:524:29: QML Rectangle: Detected anchors on an item that is managed by a layout. This is undefined behavior; use Layout.alignment instead.
+qrc:/UserClient/qml/pages/ExplorePage.qml:537:29: QML Rectangle: Detected anchors on an item that is managed by a layout. This is undefined behavior; use Layout.alignment instead.
+qrc:/UserClient/qml/pages/ExplorePage.qml:544:29: QML QQuickText: Detected anchors on an item that is managed by a layout. This is undefined behavior; use Layout.alignment instead.
+qrc:/UserClient/qml/pages/ExplorePage.qml:104: TypeError: Cannot call method 'mapTilePresetsJson' of null

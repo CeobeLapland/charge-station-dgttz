@@ -39,8 +39,21 @@ public:
     // 某电站的分时电价（对齐 price_rule）
     Q_INVOKABLE QVariantList priceRulesForStation(int stationId) const;
 
-    // 某电站的评价（对齐 review）
+    // 某电站的评价（对齐 review，含种子 + 用户新发，每条含 id/station_name/is_mine/liked_by_me/replies）
     Q_INVOKABLE QVariantList reviewsForStation(int stationId) const;
+
+    // 全部电站评价聚合（社区页）。
+    // sortMode: 0=最新(时间) 1=最热(有用数) 2=综合评分；mineOnly=true 只含当前用户新发
+    Q_INVOKABLE QVariantList allReviews(int sortMode, bool mineOnly) const;
+
+    // 写评价（r 需含 station_id + 6 维评分 + tags[] + content + nickname），成功返回 true
+    Q_INVOKABLE bool addReview(const QVariantMap& r);
+
+    // 点赞/取消「有用」，返回最新有用数（未命中返回 -1）
+    Q_INVOKABLE int toggleUseful(int reviewId);
+
+    // 追加回复（author 为当前用户昵称）
+    Q_INVOKABLE bool addReply(int reviewId, const QString& author, const QString& content);
 
     // 某区域天气（对齐 weather，缺省给北京）
     Q_INVOKABLE QVariantMap weatherForArea(const QString& area) const;
@@ -48,4 +61,8 @@ public:
     // 筛选常量（UI 下拉项直接用）
     Q_INVOKABLE QStringList ownerTypeOptions() const; // 全部/自营/具体商户名按 id
     Q_INVOKABLE QStringList ratingThresholdOptions() const; // ≥4.5 / ≥4 / ≥3 / 不限
+
+signals:
+    // 评论仓库变化（发评论/点赞/回复）→ 各页面刷新
+    void reviewsChanged();
 };
