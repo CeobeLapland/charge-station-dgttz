@@ -99,6 +99,15 @@ QTableWidget {
     selection-color: #ffffff;
 }
 
+
+/* 表格左上角（行号与列表头交叉处）跟随表头颜色 */
+QTableCornerButton::section {
+    background-color: #223042;
+    border: none;
+    border-right: 1px solid #2a3542;
+    border-bottom: 1px solid #2a3542;
+}
+
 QHeaderView::section {
     background-color: #223042;
     color: #9fb0c1;

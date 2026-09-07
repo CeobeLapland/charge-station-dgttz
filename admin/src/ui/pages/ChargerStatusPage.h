@@ -1,6 +1,9 @@
 #pragma once
 #include <QWidget>
+#include <QtCharts/QChartView>
+#include <QtCharts/QPieSeries>
 
+class QLabel;
 class QTableWidget;
 class ApiClient;
 
@@ -11,6 +14,10 @@ public:
 
 private:
     void refresh();
+    void showTipText(const QString& text);
     ApiClient* m_api = nullptr;
     QTableWidget* m_table = nullptr;
+    QPieSeries* m_pieSeries = nullptr;
+    QChartView* m_pieView = nullptr;
+    QLabel* m_tip = nullptr;   // 自绘气泡
 };
