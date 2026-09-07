@@ -69,7 +69,7 @@ Item {
             ComboBox {
                 id: themeCombo
                 width: parent.width
-                model: ["techBlue", "minimalDark", "springGreen"]
+                model: ["techBlue", "minimalDark", "springGreen", "royalPurple", "sunsetOrange", "oceanTeal", "midnightBlue"]
                 currentIndex: Math.max(0, model.indexOf(Theme.styleName))
                 background: Rectangle { color: Theme.card; border.color: Theme.border; border.width: 1; radius: Theme.radiusSmall }
                 contentItem: Text {

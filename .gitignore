@@ -65,5 +65,8 @@ screen/vendor/
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+
+.trae/
 *.tar.gz
 *.zip

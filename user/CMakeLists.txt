@@ -42,8 +42,10 @@ qt_add_executable(charge_user_client
     qml/pages/SwitchAccountPage.qml
     qml/pages/FindPasswordPage.qml
     qml/pages/AppealPage.qml
+    qml/pages/AgreementPage.qml
     qml/pages/HomePage.qml
     qml/pages/ExplorePage.qml
+    qml/pages/FaqPage.qml
     qml/pages/StationDetailPage.qml
     qml/pages/MessagePage.qml
     qml/pages/ChatPage.qml
@@ -85,8 +87,10 @@ qt_add_qml_module(charge_user_client
         qml/pages/SwitchAccountPage.qml
         qml/pages/FindPasswordPage.qml
         qml/pages/AppealPage.qml
+        qml/pages/AgreementPage.qml
         qml/pages/HomePage.qml
         qml/pages/ExplorePage.qml
+        qml/pages/FaqPage.qml
         qml/pages/StationDetailPage.qml
         qml/pages/MessagePage.qml
         qml/pages/ChatPage.qml
