@@ -15,6 +15,7 @@ private slots:
     void onRestart();
     void onPause();
     void onAddCharger();
+    void onShowLogs();
     void appendLog(const QString& text);
 
 private:
