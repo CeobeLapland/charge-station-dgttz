@@ -2,7 +2,8 @@ import QtQuick
 import QtQuick.Controls
 import UserClient
 
-// 登录页：顶部欢迎语+软件名，右上角切换账号；中部账号/密码、记住密码、自动登录；底部找回密码/我要申诉
+// 登录页：顶部欢迎语+软件名，右上角切换账号；中部手机号、密码、记住密码、自动登录；底部找回密码/我要申诉。
+// 在线时手机号免密（backend.login），密码框保留（离线本地校验/样子货）。
 Item {
     id: root
 
@@ -78,12 +79,12 @@ Item {
         anchors.rightMargin: 32
         spacing: 16
 
-        // 账号输入
+        // 手机号输入
         Column {
             width: parent.width
             spacing: 6
             Text {
-                text: qsTr("账号")
+                text: qsTr("手机号")
                 font.pixelSize: Theme.fontSizeSmall
                 color: Theme.textSecondary
             }
@@ -101,8 +102,9 @@ Item {
                     anchors.leftMargin: 14
                     anchors.rightMargin: 14
                     verticalAlignment: Text.AlignVCenter
-                    placeholderText: qsTr("请输入账号")
-                    maximumLength: 20
+                    placeholderText: qsTr("请输入手机号")
+                    inputMethodHints: Qt.ImhDialableCharactersOnly
+                    maximumLength: 11
                     onTextChanged: restoreAccountConfig()
                 }
             }
@@ -255,14 +257,33 @@ Item {
         }
     }
 
+    // 登录：在线 → 服务端手机号免密（backend.login，密码本地留存不校验）；离线 → 本地账号+密码校验（示例兜底）
     function doLogin() {
         var acc = accountField.text.trim()
         var pwd = passwordField.text
         if (acc.length === 0) {
-            errText.text = qsTr("请输入账号")
+            errText.text = qsTr("请输入手机号")
             errText.visible = true
             return
         }
+        // 冻结账号审查：拒绝登录并弹窗提示（对应 user.status=frozen）
+        if (authStore.isFrozen(acc)) {
+            failCount = 0
+            errText.visible = false
+            frozenDlg.open()
+            return
+        }
+        if (backend.isConnected()) {
+            // 在线免密：手机号登录（不存在则服务端自动注册），密码本地留存
+            if (authStore.hasAccount(acc))
+                authStore.updateOptions(acc, rememberCb.checked, autoCb.checked)
+            else
+                authStore.registerAccount(acc, pwd, rememberCb.checked, autoCb.checked)
+            backend.login(acc)
+            authStore.login(acc)
+            return
+        }
+        // 离线降级：本地账号+密码校验（保留原示例逻辑）
         if (pwd.length === 0) {
             errText.text = qsTr("请输入密码")
             errText.visible = true
@@ -272,13 +293,6 @@ Item {
             failCount = 0
             errText.visible = false
             notFoundDlg.open()
-            return
-        }
-        // 冻结账号审查：拒绝登录并弹窗提示（对应 user.status=frozen）
-        if (authStore.isFrozen(acc)) {
-            failCount = 0
-            errText.visible = false
-            frozenDlg.open()
             return
         }
         if (!authStore.verifyLogin(acc, pwd)) {
@@ -320,7 +334,7 @@ Item {
         })
     }
 
-    // 切换账号回填：账号 + 记住密码/自动登录勾选状态
+    // 切换账号回填：账号 + 密码 + 记住密码/自动登录勾选状态
     function applyAccount(acc) {
         errText.visible = false
         failCount = 0

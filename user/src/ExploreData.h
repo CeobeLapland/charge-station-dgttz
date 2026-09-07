@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QHash>
 #include <QObject>
 #include <QString>
 #include <QStringList>
@@ -33,6 +34,11 @@ public:
     Q_INVOKABLE QVariantList stations() const;
     Q_INVOKABLE QVariantMap stationById(int stationId) const;
 
+    // 服务端接线：station.nearby_resp 覆盖/合并站表（服务端缺的展示字段本地兜底）
+    Q_INVOKABLE void applyStations(const QVariantList& stations);
+    // 服务端接线：station.detail_resp 回填某电站电桩（缺的字段按 type 兜底）
+    Q_INVOKABLE void applyChargers(int stationId, const QVariantList& chargers);
+
     // 某电站的电桩列表（对齐 charger 字段）
     Q_INVOKABLE QVariantList chargersForStation(int stationId) const;
 
@@ -65,4 +71,12 @@ public:
 signals:
     // 评论仓库变化（发评论/点赞/回复）→ 各页面刷新
     void reviewsChanged();
+    // 服务端站表/电桩回写 → 探索/首页/详情刷新
+    void stationsChanged();
+    void chargersChanged();
+
+private:
+    QVariantList m_stations;                 // 站表缓存（种子 → 服务端 nearby 覆盖）
+    QHash<int, QVariantList> m_chargers;     // stationId → 电桩（种子 → 服务端 detail 回填）
+    QHash<int, QVariantList> m_priceRules;   // stationId → 分时电价
 };

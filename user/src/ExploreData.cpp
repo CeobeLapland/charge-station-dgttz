@@ -457,8 +457,75 @@ QVariantMap weatherMock() {
 
 }  // namespace
 
+// —— 由种子构造缓存（构造期执行一次；之后站表/电桩由服务端 apply* 覆盖） ——
+static void buildSeedCaches(QVariantList& stationsOut,
+                            QHash<int, QVariantList>& chargersOut,
+                            QHash<int, QVariantList>& priceRulesOut) {
+    const auto seeds = buildSeeds();
+    const auto merchantsLocal = buildMerchants();
+    QHash<int, QString> merchantName;
+    merchantName.insert(0, QStringLiteral("平台自营"));
+    for (const auto& m : merchantsLocal) {
+        auto mm = m.toMap();
+        merchantName.insert(mm.value("id").toInt(), mm.value("name").toString());
+    }
+    for (const auto& s : seeds) {
+        int fastIdle = 0, slowIdle = 0, fastCount = 0, slowCount = 0, offline = 0, fault = 0, charging = 0;
+        for (const auto& c : s.chargers) {
+            if (qstrcmp(c.type, "fast") == 0) fastCount++; else slowCount++;
+            if (qstrcmp(c.status, "idle") == 0) {
+                if (qstrcmp(c.type,"fast")==0) fastIdle++; else slowIdle++;
+            } else if (qstrcmp(c.status,"offline")==0) offline++;
+              else if (qstrcmp(c.status,"fault")==0)   fault++;
+              else if (qstrcmp(c.status,"charging")==0) charging++;
+        }
+        QStringList areas = QString(s.area).split('/', Qt::SkipEmptyParts);
+        stationsOut.append(S({
+            {"id",                s.id},
+            {"name",              QString::fromUtf8(s.name)},
+            {"address",           QString::fromUtf8(s.address)},
+            {"area",              QString::fromUtf8(s.area)},
+            {"area_province",     areas.size() > 0 ? areas[0] : QString()},
+            {"area_city",         areas.size() > 1 ? areas[1] : QString()},
+            {"area_district",     areas.size() > 2 ? areas[2] : (areas.size()==2?areas[1]:QString())},
+            {"longitude",         s.lng},
+            {"latitude",          s.lat},
+            {"total_chargers",    (int)s.chargers.size()},
+            {"fast_count",        fastCount},
+            {"slow_count",        slowCount},
+            {"fast_idle",         fastIdle},
+            {"slow_idle",         slowIdle},
+            {"online_rate",       s.onlineRate},
+            {"service_fee",       s.serviceFee},
+            {"parking_fee",       s.parkingFee},
+            {"business_hours",    QString::fromUtf8(s.businessHours)},
+            {"facilities",        s.facilities},
+            {"owner_type",        QString::fromUtf8(s.ownerType)},
+            {"owner_label",
+                QString(s.ownerType)=="self_run" ? QStringLiteral("自营") :
+                QString(s.ownerType)=="partner"  ? QStringLiteral("合作商户") :
+                QString(s.ownerType)=="franchise"? QStringLiteral("特许经营") :
+                QString(s.ownerType)=="third_party"?QStringLiteral("第三方商圈"):
+                QString::fromUtf8(s.ownerType) },
+            {"merchant_id",       s.merchantId},
+            {"merchant_name",     merchantName.value(s.merchantId)},
+            {"has_swap",          s.hasSwap},
+            {"rating",            s.rating},
+            {"rating_count",      s.ratingCount},
+            {"offline_count",     offline},
+            {"fault_count",       fault},
+            {"charging_count",    charging},
+            {"weather_area",      s.weatherArea}
+        }));
+        chargersOut.insert(s.id, makeChargers(s.id, s.chargers));
+        priceRulesOut.insert(s.id, s.priceRules);
+    }
+}
+
 // —— ExploreData 实现 ——
-ExploreData::ExploreData(QObject* parent) : QObject(parent) {}
+ExploreData::ExploreData(QObject* parent) : QObject(parent) {
+    buildSeedCaches(m_stations, m_chargers, m_priceRules);
+}
 
 QVariantList ExploreData::regionsTree() const {
     static const QVariantList s = buildRegions();
@@ -498,65 +565,7 @@ QString ExploreData::merchantNameFor(int merchantId) const {
 }
 
 QVariantList ExploreData::stations() const {
-    static const auto seeds = buildSeeds();
-    static const auto merchantsLocal = buildMerchants();
-    QHash<int, QString> merchantName;
-    merchantName.insert(0, QStringLiteral("平台自营"));
-    for (const auto& m : merchantsLocal) {
-        auto mm = m.toMap();
-        merchantName.insert(mm.value("id").toInt(), mm.value("name").toString());
-    }
-    QVariantList out;
-    for (const auto& s : seeds) {
-        int fastIdle = 0, slowIdle = 0, fastCount = 0, slowCount = 0, offline = 0, fault = 0, charging = 0;
-        for (const auto& c : s.chargers) {
-            if (qstrcmp(c.type, "fast") == 0) fastCount++; else slowCount++;
-            if (qstrcmp(c.status, "idle") == 0) {
-                if (qstrcmp(c.type,"fast")==0) fastIdle++; else slowIdle++;
-            } else if (qstrcmp(c.status,"offline")==0) offline++;
-              else if (qstrcmp(c.status,"fault")==0)   fault++;
-              else if (qstrcmp(c.status,"charging")==0) charging++;
-        }
-        QStringList areas = QString(s.area).split('/', Qt::SkipEmptyParts);
-        out.append(S({
-            {"id",                s.id},
-            {"name",              QString::fromUtf8(s.name)},
-            {"address",           QString::fromUtf8(s.address)},
-            {"area",              QString::fromUtf8(s.area)},
-            {"area_province",     areas.size() > 0 ? areas[0] : QString()},
-            {"area_city",         areas.size() > 1 ? areas[1] : QString()},
-            {"area_district",     areas.size() > 2 ? areas[2] : (areas.size()==2?areas[1]:QString())},
-            {"longitude",         s.lng},
-            {"latitude",          s.lat},
-            {"total_chargers",    (int)s.chargers.size()},
-            {"fast_count",        fastCount},
-            {"slow_count",        slowCount},
-            {"fast_idle",         fastIdle},
-            {"slow_idle",         slowIdle},
-            {"online_rate",       s.onlineRate},
-            {"service_fee",       s.serviceFee},
-            {"parking_fee",       s.parkingFee},
-            {"business_hours",    QString::fromUtf8(s.businessHours)},
-            {"facilities",        s.facilities},
-            {"owner_type",        QString::fromUtf8(s.ownerType)},
-            {"owner_label",
-                QString(s.ownerType)=="self_run" ? QStringLiteral("自营") :
-                QString(s.ownerType)=="partner"  ? QStringLiteral("合作商户") :
-                QString(s.ownerType)=="franchise"? QStringLiteral("特许经营") :
-                QString(s.ownerType)=="third_party"?QStringLiteral("第三方商圈"):
-                QString::fromUtf8(s.ownerType) },
-            {"merchant_id",       s.merchantId},
-            {"merchant_name",     merchantName.value(s.merchantId)},
-            {"has_swap",          s.hasSwap},
-            {"rating",            s.rating},
-            {"rating_count",      s.ratingCount},
-            {"offline_count",     offline},
-            {"fault_count",       fault},
-            {"charging_count",    charging},
-            {"weather_area",      s.weatherArea}
-        }));
-    }
-    return out;
+    return m_stations;
 }
 
 // ———————————————————————————————————————————————
@@ -623,7 +632,7 @@ static QVariantMap reviewToMap(const ReviewRec& rec) {
 }
 
 QVariantMap ExploreData::stationById(int stationId) const {
-    for (const auto& s : stations()) {
+    for (const auto& s : m_stations) {
         auto mm = s.toMap();
         if (mm.value("id").toInt() == stationId) return mm;
     }
@@ -631,19 +640,109 @@ QVariantMap ExploreData::stationById(int stationId) const {
 }
 
 QVariantList ExploreData::chargersForStation(int stationId) const {
-    static const auto seeds = buildSeeds();
-    for (const auto& s : seeds)
-        if (s.id == stationId)
-            return makeChargers(stationId, s.chargers);
-    return {};
+    return m_chargers.value(stationId);
 }
 
 QVariantList ExploreData::priceRulesForStation(int stationId) const {
-    static const auto seeds = buildSeeds();
-    for (const auto& s : seeds)
-        if (s.id == stationId)
-            return s.priceRules;
+    if (m_priceRules.contains(stationId))
+        return m_priceRules.value(stationId);
+    // 服务端电站没有分时规则：用 nearby 返回的当前电价兜底单档
+    const double price = stationById(stationId).value(QStringLiteral("price")).toDouble();
+    if (price > 0)
+        return { S({{"level","flat"},{"price",price},{"time_range","00:00–24:00"}}) };
     return {};
+}
+
+// —— 服务端接线：station.nearby_resp ——
+// 以服务端站表为准整体覆盖种子（保证 station_id 与服务端库一致，预约才能通过）；
+// 服务端 nearby 只带 id/名称/地址/坐标/桩数/服务费/当前电价/距离，其余展示字段本地兜底。
+void ExploreData::applyStations(const QVariantList& list) {
+    if (list.isEmpty())
+        return;
+    QVariantList out;
+    for (const QVariant& v : list) {
+        const QVariantMap s = v.toMap();
+        const int id = s.value(QStringLiteral("id")).toInt();
+        if (id <= 0)
+            continue;
+        const int total = s.value(QStringLiteral("total_chargers")).toInt();
+        const int free  = s.value(QStringLiteral("free_chargers")).toInt();
+        const int fastCount = qMax(0, (int)(total * 0.6 + 0.5));  // 快慢按 6:4 估算
+        const int fastIdle  = qMax(0, (int)(free  * 0.6 + 0.5));
+
+        QVariantMap m = s;
+        QStringList areas = s.value(QStringLiteral("area")).toString().split('/', Qt::SkipEmptyParts);
+        if (!m.contains(QStringLiteral("area_province")))
+            m.insert(QStringLiteral("area_province"), areas.size() > 0 ? areas[0] : QString());
+        if (!m.contains(QStringLiteral("area_city")))
+            m.insert(QStringLiteral("area_city"), areas.size() > 1 ? areas[1] : QString());
+        if (!m.contains(QStringLiteral("area_district")))
+            m.insert(QStringLiteral("area_district"), areas.size() > 2 ? areas[2] : (areas.size()==2?areas[1]:QString()));
+        if (!m.contains(QStringLiteral("fast_count"))) m.insert(QStringLiteral("fast_count"), fastCount);
+        if (!m.contains(QStringLiteral("slow_count"))) m.insert(QStringLiteral("slow_count"), qMax(0, total - fastCount));
+        if (!m.contains(QStringLiteral("fast_idle")))  m.insert(QStringLiteral("fast_idle"), fastIdle);
+        if (!m.contains(QStringLiteral("slow_idle")))  m.insert(QStringLiteral("slow_idle"), qMax(0, free - fastIdle));
+        if (!m.contains(QStringLiteral("rating")))     m.insert(QStringLiteral("rating"), 4.5);
+        if (!m.contains(QStringLiteral("rating_count"))) m.insert(QStringLiteral("rating_count"), 0);
+        if (!m.contains(QStringLiteral("owner_type"))) m.insert(QStringLiteral("owner_type"), QStringLiteral("self_run"));
+        if (!m.contains(QStringLiteral("owner_label"))) m.insert(QStringLiteral("owner_label"), QStringLiteral("自营"));
+        if (!m.contains(QStringLiteral("merchant_id"))) m.insert(QStringLiteral("merchant_id"), 0);
+        if (!m.contains(QStringLiteral("merchant_name"))) m.insert(QStringLiteral("merchant_name"), QStringLiteral("平台自营"));
+        if (!m.contains(QStringLiteral("has_swap")))    m.insert(QStringLiteral("has_swap"), 0);
+        if (!m.contains(QStringLiteral("facilities")))  m.insert(QStringLiteral("facilities"), QVariantList());
+        if (!m.contains(QStringLiteral("business_hours"))) m.insert(QStringLiteral("business_hours"), QStringLiteral("00:00–24:00"));
+        if (!m.contains(QStringLiteral("online_rate"))) m.insert(QStringLiteral("online_rate"), 1.0);
+        if (!m.contains(QStringLiteral("parking_fee"))) m.insert(QStringLiteral("parking_fee"), 0.0);
+        if (!m.contains(QStringLiteral("offline_count"))) m.insert(QStringLiteral("offline_count"), 0);
+        if (!m.contains(QStringLiteral("fault_count"))) m.insert(QStringLiteral("fault_count"), 0);
+        if (!m.contains(QStringLiteral("charging_count"))) m.insert(QStringLiteral("charging_count"), 0);
+        if (!m.contains(QStringLiteral("weather_area")))
+            m.insert(QStringLiteral("weather_area"), s.value(QStringLiteral("area")).toString());
+        out.append(m);
+
+        // 分时电价兜底：单档当前电价（StationDetailPage/首页起价用）
+        if (!m_priceRules.contains(id)) {
+            const double price = s.value(QStringLiteral("price")).toDouble();
+            if (price > 0)
+                m_priceRules.insert(id, QVariantList{S({{"level","flat"},{"price",price},{"time_range","00:00–24:00"}})});
+            else
+                m_priceRules.insert(id, QVariantList{});
+        }
+    }
+    if (out.isEmpty())
+        return;
+    m_stations = out;
+    m_chargers.clear();   // 站表整体换了，种子电桩不再对得上，等 detail 回填
+    emit stationsChanged();
+}
+
+// —— 服务端接线：station.detail_resp ——
+// detail 只带 id/code/type/power/status/health_score，其余电桩展示字段按 type 兜底。
+void ExploreData::applyChargers(int stationId, const QVariantList& list) {
+    if (stationId <= 0)
+        return;
+    QVariantList out;
+    for (const QVariant& v : list) {
+        const QVariantMap c = v.toMap();
+        if (c.value(QStringLiteral("id")).toInt() <= 0)
+            continue;
+        QVariantMap m = c;
+        const QString type = m.value(QStringLiteral("type")).toString();
+        if (!m.contains(QStringLiteral("station_id"))) m.insert(QStringLiteral("station_id"), stationId);
+        if (!m.contains(QStringLiteral("voltage")))    m.insert(QStringLiteral("voltage"), type == QStringLiteral("fast") ? 380 : 220);
+        if (!m.contains(QStringLiteral("current")))    m.insert(QStringLiteral("current"), type == QStringLiteral("fast") ? 150 : 15);
+        if (!m.contains(QStringLiteral("temperature"))) m.insert(QStringLiteral("temperature"), 25);
+        if (!m.contains(QStringLiteral("fault_code")))  m.insert(QStringLiteral("fault_code"), QString());
+        if (!m.contains(QStringLiteral("comm_status")))
+            m.insert(QStringLiteral("comm_status"), m.value(QStringLiteral("status")).toString() == QStringLiteral("offline") ? QStringLiteral("abnormal") : QStringLiteral("normal"));
+        if (!m.contains(QStringLiteral("total_charge_count"))) m.insert(QStringLiteral("total_charge_count"), 0);
+        if (!m.contains(QStringLiteral("total_charge_duration"))) m.insert(QStringLiteral("total_charge_duration"), 0);
+        if (!m.contains(QStringLiteral("created_time")))
+            m.insert(QStringLiteral("created_time"), QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss")));
+        out.append(m);
+    }
+    m_chargers.insert(stationId, out);
+    emit chargersChanged();
 }
 
 QVariantList ExploreData::reviewsForStation(int stationId) const {

@@ -15,7 +15,12 @@ Item {
     // 碳排因子（spec 待定项建议初值 0.7 kg CO2/kWh）
     readonly property real carbonFactor: 0.7
 
-    readonly property var allOrders: UserData.orders()
+    property var allOrders: UserData.orders()
+    // 订单随服务端/本地回写实时刷新（order.settle_resp / ingestOrder 均触发 ordersChanged）
+    Connections {
+        target: UserData
+        function onOrdersChanged() { root.allOrders = UserData.orders() }
+    }
 
     function statusText(s) {
         if (s === "reserved")       return qsTr("预约中")
@@ -475,8 +480,14 @@ Item {
                         var bal = Number(UserData.profile().balance || 0)
                         if (bal >= pay) {
                             if (UserData.recharge(-pay)) {
+                                // 回写订单为已完成：订单页随 ordersChanged 自动刷新，待支付账单即时消失
+                                // （真实场景由 order.settle_resp → ingestOrder 处理，这里本地直改保持一致）
+                                var o = {}
+                                for (var k in order) o[k] = order[k]
+                                o.status = "completed"
+                                o.pay_amount = pay
+                                UserData.ingestOrder(o)
                                 showToast(qsTr("支付成功，已从余额扣款 ¥") + pay.toFixed(2))
-                                // 模拟订单状态更新（实际由服务端改，这里返回列表即可）
                                 root.selectedOrderId = 0
                             }
                         } else {

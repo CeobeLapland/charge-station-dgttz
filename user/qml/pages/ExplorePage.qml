@@ -34,7 +34,15 @@ Item {
     }
 
     // —— 筛选/区域 UI 状态（在 QML 层持有，写入 JS）——
-    readonly property var stationsAll: ExploreData.stations()
+    property var stationsAll: ExploreData.stations()   // 服务端 nearby 回写后刷新
+    Connections {
+        target: ExploreData
+        function onStationsChanged() {
+            stationsAll = ExploreData.stations()
+            applyStations()
+            applyFilter()
+        }
+    }
     readonly property var ownerOptions: [
         { label: qsTr("不限归属"),         value: "all" },
         { label: qsTr("仅自营"),           value: "self_run" },
