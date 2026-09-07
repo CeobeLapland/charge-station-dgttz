@@ -23,6 +23,12 @@ qt_add_executable(charge_server
     src/AdminDao.cpp
     src/ScreenDao.h
     src/ScreenDao.cpp
+    src/OrderDao.h
+    src/OrderDao.cpp
+    src/WorkOrderDao.h
+    src/WorkOrderDao.cpp
+    src/ChargeSimulator.h
+    src/ChargeSimulator.cpp
     src/WsServer.h
     src/WsServer.cpp
 )

@@ -33,7 +33,7 @@ bool open(const QString &dbPath)
     QSqlQuery pragma;
     pragma.exec(QStringLiteral("PRAGMA foreign_keys = ON"));
 
-    // 4. 抽查一张核心表, 确认库是建好的(而不是一个意外产生的空库)。
+    // 4. 抽查一张核心表, 确认库是建好的。
     QSqlQuery check;
     if (!check.exec(QStringLiteral(
             "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='user'"))

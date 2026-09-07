@@ -1,10 +1,12 @@
 #pragma once
 #include <QHash>
+#include <QThread>
 #include <QJsonObject>
 #include <QObject>
 #include <QWebSocketServer>
 
 class QWebSocket;
+class ChargeSimulator;
 
 // ============================================================
 // WsServer — WebSocket 服务主循环("接线员")
@@ -18,8 +20,8 @@ class QWebSocket;
 // 错误码分段(新增错误码请按此分段, 并同步 spec-协议.md):
 //   0     成功
 //   1xxx  用户相关    1004未登录 1002手机号格式错误 1003用户被冻结
-//   2xxx  订单/充电相关
-//   3xxx  电站/电桩相关
+//   2xxx  订单/充电   2001有未完成订单 2002余额不足 2003状态不允许该操作
+//   3xxx  电站/电桩   3002电桩非空闲
 //   4xxx  数据不存在  4001数据不存在
 //   5xxx  模型层      5001预测/模型不可用
 //   9xxx  协议层      9001消息格式错误 9002未知消息类型
@@ -29,13 +31,24 @@ class WsServer : public QObject
     Q_OBJECT
 public:
     explicit WsServer(quint16 port, QObject *parent = nullptr);
+    ~WsServer() override;
     bool isListening() const;
+
+    // 只推给某个已登录用户的连接(可能有多条)。push.order_progress 这类
+    // "只跟一个人有关"的消息走这里, 不广播给所有端。
+    void sendToUser(int userId, const QString &type, const QJsonObject &payload);
 
     // 向所有在线连接推送一条消息(无 seq)。所有 push.* 都走这里。
     // 例: broadcast("push.charger_status", {{"charger_id",7},{"status","charging"}});
     void broadcast(const QString &type, const QJsonObject &payload);
 
 private slots:
+    // ---- 来自充电仿真工作线程的信号(队列连接, 在主线程执行) ----
+    void onSimProgress(int orderId, int userId, int chargerId, int stationId,
+                       double soc, double powerKw, double energyKwh, double cost, int etaMin);
+    void onSimMeasure(int chargerId, int stationId, double powerKw, double soc, double energyDelta);
+    void onSimReachedTarget(int orderId, int userId, double endSoc);
+
     void onNewConnection();                       // 有新客户端连上来
     void onTextMessage(const QString &message);   // 收到一条文本消息
     void onDisconnected();                        // 客户端断开
@@ -58,6 +71,8 @@ private:
 
     // admin.* 的统一准入: 未登录时回填 1004 并返回 false。
     bool requireAdmin(QWebSocket *sock, int &code, QString &message) const;
+    // user.*/order.* 的统一准入: 未登录时回填 1004 并返回 false。
+    bool requireUser(QWebSocket *sock, int &code, QString &message) const;
 
     // 分发中心: 按 type 调用对应处理函数。
     // 返回响应的 payload; code/message 通过引用参数回填。
@@ -69,6 +84,7 @@ private:
     QJsonObject handlePing(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
     QJsonObject handleUserLogin(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
     QJsonObject handleUserInfo(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+    QJsonObject handleUserRecharge(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
     QJsonObject handleStationNearby(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
     QJsonObject handleStationDetail(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
 
@@ -87,10 +103,52 @@ private:
     QJsonObject handleAdminDeviceLog(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
     QJsonObject handleAdminFaultRisk(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
 
+    // ---- 订单 order.* ----
+    QJsonObject handleOrderCreate(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+    QJsonObject handleOrderStart(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+    QJsonObject handleOrderFinish(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+    QJsonObject handleOrderSettle(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+    QJsonObject handleOrderCancel(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+    QJsonObject handleOrderList(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+    QJsonObject handleOrderDetail(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+
+    // ---- 我的车辆 vehicle.* / 工单 work_order.* / 预约 reservation.* ----
+    QJsonObject handleUserUpdateProfile(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+    QJsonObject handleVehicleAdd(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+    QJsonObject handleVehicleList(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+    QJsonObject handleVehicleUpdate(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+    QJsonObject handleVehicleDelete(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+    QJsonObject handleWorkOrderCreate(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+    QJsonObject handleWorkOrderList(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+    QJsonObject handleReservationJoin(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+    QJsonObject handleReservationCancel(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+    QJsonObject handleReservationList(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+
+    // 一根桩空出来时叫号: 匹配该站队首并推送 push.reservation_notify
+    void notifyQueueOnChargerFree(int stationId);
+
+    // 启动时把仍在 charging 的订单交还给仿真线程(服务端重启恢复)
+    void resumeChargingOrders();
+
     // ---- 数据大屏 screen.* / ml.* ----
     QJsonObject handleScreenSnapshot(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
     QJsonObject handleMlForecast(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
 
+    // 把一笔订单交给仿真线程 / 从仿真线程撤下(跨线程调用, 队列投递)
+    void simAddOrder(int orderId, int userId, int chargerId, int stationId,
+                     double startSoc, double targetSoc, double powerKw,
+                     double batteryKwh, double unitPrice);
+    void simRemoveOrder(int orderId);
+
     QWebSocketServer m_server;
     QHash<QWebSocket *, Session> m_clients;   // 在线连接 → 该连接的身份
+
+    // 仿真器报上来的最新进度(orderId → SOC)。
+    // 用户手动点"结束充电"时如果没带 end_soc, 就用这里的值 ——
+    // 否则会按"真实经过了几秒"去算电量, 金额会严重偏低。
+    QHash<int, double> m_liveSoc;
+
+    // ---- 充电仿真: 工作线程 + 仿真器对象 ----
+    QThread          m_simThread;
+    ChargeSimulator *m_sim = nullptr;
 };

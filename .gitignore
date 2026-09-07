@@ -68,3 +68,5 @@ Desktop.ini
 
 
 .trae/
+*.tar.gz
+*.zip

@@ -33,7 +33,7 @@ struct StatusDistribution {
     int total = 0;
 };
 
-// 电站全字段
+// 电站全字段(管理端表格用, 比 StationView 多几列)
 struct StationFull {
     int     id = 0;
     QString name, address, area;
@@ -116,9 +116,10 @@ QList<DeviceLogRow> listDeviceLogs(int chargerId);
 // 对电桩执行运维动作并记一条 device_log。
 //   action = "restart" → status 置 rebooting
 //   action = "pause"   → status 置 offline
-// 电桩不存在返回 nullopt。成功返回新写入的日志行。
+// 电桩不存在、或该桩上有进行中订单(reserved/charging)时返回 nullopt。
+// busyOut 不为空时回填"是否因为有进行中订单而被拒绝", 用于区分 4001 和 3002。
 std::optional<DeviceLogRow> chargerAction(int chargerId, const QString &action,
-                                          const QString &opAccount);
+                                          const QString &opAccount, bool *busyOut = nullptr);
 
 // 冻结/解冻用户。status 只能是 normal / frozen。
 std::optional<UserRow> setUserStatus(int userId, const QString &status);

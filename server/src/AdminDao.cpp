@@ -14,6 +14,13 @@ QString nowStr()
     return QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"));
 }
 
+// JSON 里缺失的 key 取出来是"空(null) QString", Qt 会把它当 SQL 的 NULL 绑进去,
+// 撞上 NOT NULL 约束整条插入就失败。所有写进 NOT NULL 文本列的值都要过这一道。
+QString nz(const QString &s)
+{
+    return s.isNull() ? QString::fromLatin1("") : s;
+}
+
 StationFull rowToStation(const QSqlQuery &q)
 {
     StationFull s;
@@ -296,7 +303,7 @@ QList<DeviceLogRow> listDeviceLogs(int chargerId)
 
 // ============================ 写操作 ============================
 std::optional<DeviceLogRow> chargerAction(int chargerId, const QString &action,
-                                          const QString &opAccount)
+                                          const QString &opAccount, bool *busyOut)
 {
     // 目标状态: restart → rebooting, pause → offline
     const QString newStatus = (action == QStringLiteral("restart"))
@@ -309,6 +316,20 @@ std::optional<DeviceLogRow> chargerAction(int chargerId, const QString &action,
     if (!exists.exec() || !exists.next())
         return std::nullopt;                       // 4001 电桩不存在
 
+    // ★ 这根桩上有没有进行中的订单? 有就不能动 ——
+    //   否则会出现"订单还是 charging、桩已经是 rebooting"的不一致状态,
+    //   而且仿真线程还在继续推进那笔订单。
+    QSqlQuery busy;
+    busy.prepare(QStringLiteral(
+        "SELECT COUNT(*) FROM charging_order WHERE charger_id=? "
+        "AND status IN ('reserved','charging')"));
+    busy.addBindValue(chargerId);
+    if (busy.exec() && busy.next() && busy.value(0).toInt() > 0) {
+        if (busyOut) *busyOut = true;
+        return std::nullopt;                       // 3002 该桩有进行中订单
+    }
+
+    // 改状态 + 记日志必须一起成功, 否则会出现"状态变了但没有操作记录"
     QSqlDatabase::database().transaction();
 
     QSqlQuery up;
@@ -367,9 +388,9 @@ std::optional<StationFull> addStation(const StationFull &s)
         "                    online_rate, service_fee, parking_fee, business_hours, "
         "                    facilities, owner_type, has_swap) "
         "VALUES(?,?,?,?,?,?,100,?,?,?,?,?,?)"));
-    ins.addBindValue(s.name);
-    ins.addBindValue(s.address);
-    ins.addBindValue(s.area);
+    ins.addBindValue(nz(s.name));
+    ins.addBindValue(nz(s.address));
+    ins.addBindValue(nz(s.area));
     ins.addBindValue(s.longitude);
     ins.addBindValue(s.latitude);
     ins.addBindValue(s.totalChargers);
@@ -381,7 +402,25 @@ std::optional<StationFull> addStation(const StationFull &s)
     ins.addBindValue(s.hasSwap);
     if (!ins.exec())
         return std::nullopt;
-    return findStationFullById(ins.lastInsertId().toInt());
+    const int newId = ins.lastInsertId().toInt();
+
+    // ★ 光插 station 行是不够的: 不建 charger, 列表会显示"共 N 台桩 / 空闲 0",
+    //   点进详情电桩列表却是空的。这里按 total_chargers 真的把桩建出来。
+    const int n = qBound(0, s.totalChargers, 50);
+    for (int i = 1; i <= n; ++i) {
+        const bool fast = (i <= (n + 1) / 2);       // 一半快充一半慢充
+        QSqlQuery c;
+        c.prepare(QStringLiteral(
+            "INSERT INTO charger(code, station_id, type, power, status, health_score) "
+            "VALUES(?,?,?,?,'idle',100)"));
+        c.addBindValue(QStringLiteral("%1-%2").arg(QChar('A' + ((newId - 1) % 26)))
+                           .arg(i, 3, 10, QChar('0')));
+        c.addBindValue(newId);
+        c.addBindValue(fast ? QStringLiteral("fast") : QStringLiteral("slow"));
+        c.addBindValue(fast ? 60.0 : 7.0);
+        c.exec();
+    }
+    return findStationFullById(newId);
 }
 
 }  // namespace dao
