@@ -41,21 +41,17 @@ Item {
             width: parent.width
             height: 72
             color: Theme.primary
-            Row {
-                anchors.left: parent.left; anchors.right: parent.right
+            Text {
+                text: qsTr("消息")
+                anchors.left: parent.left; anchors.leftMargin: 20
                 anchors.verticalCenter: parent.verticalCenter
-                anchors.leftMargin: 20; anchors.rightMargin: 20
-                spacing: 10
-                Text {
-                    text: qsTr("消息")
-                    color: "#ffffff"; font.pixelSize: Theme.fontSizeTitle; font.bold: true
-                }
-                Item { width: 1; height: 1 }
-                Text {
-                    id: unreadLbl
-                    anchors.verticalCenter: parent.verticalCenter; anchors.right: parent.right
-                    color: "#ffffff"; font.pixelSize: Theme.fontSizeSmall
-                }
+                color: "#ffffff"; font.pixelSize: Theme.fontSizeTitle; font.bold: true
+            }
+            Text {
+                id: unreadLbl
+                anchors.right: parent.right; anchors.rightMargin: 20
+                anchors.verticalCenter: parent.verticalCenter
+                color: "#ffffff"; font.pixelSize: Theme.fontSizeSmall
             }
         }
 
@@ -99,13 +95,12 @@ Item {
                     visible: Number(model.unread) > 0
                     anchors.left: avatar.right; anchors.top: avatar.top
                     anchors.leftMargin: -12; anchors.topMargin: -6
-                    width: Math.max(20, unreadTxt.implicitWidth + 12)
+                    width: 22
                     height: 20; radius: 10
                     color: Theme.danger
                     Text {
-                        id: unreadTxt
                         anchors.centerIn: parent
-                        text: Number(model.unread) > 99 ? "99+" : model.unread
+                        text: Number(model.unread) > 99 ? "99+" : String(model.unread || 0)
                         color: "#ffffff"; font.pixelSize: Theme.fontSizeTiny; font.bold: true
                     }
                 }
@@ -144,9 +139,11 @@ Item {
                 MouseArea {
                     anchors.fill: parent
                     onClicked: {
-                        ChatData.markRead(model.id)
+                        var cid = model.id
+                        var ctitle = model.title
+                        ChatData.markRead(cid)
                         root.stackView.push("qrc:/UserClient/qml/pages/ChatPage.qml",
-                                            { conversationId: model.id })
+                                            { conversationId: cid, conversationTitle: ctitle })
                     }
                     onPressAndHold: clearDlg.bind(model.id, model.title)
                 }
