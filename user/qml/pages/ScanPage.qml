@@ -50,11 +50,34 @@ Item {
         height: 56; radius: Theme.radiusSmall
         color: "#1A12c8ff"
         Row {
-            anchors.centerIn: parent; spacing: 8
+            anchors.centerIn: parent; spacing: 10
             Text { text: "\u{1F4CD}"; font.pixelSize: 16 }
             Text {
+                width: 200; elide: Text.ElideRight
                 text: qsTr("请到 ") + root.expectCode + qsTr(" 号桩，将二维码对准取景框")
                 color: "#9BEEFF"; font.pixelSize: Theme.fontSizeSmall
+                verticalAlignment: Text.AlignVCenter
+            }
+            // 去导航（高德 web 路线规划）
+            Rectangle {
+                width: 68; height: 28; radius: 14
+                color: "#12c8ff"
+                Text { anchors.centerIn: parent; text: qsTr("去导航"); color: "#ffffff"; font.bold: true; font.pixelSize: Theme.fontSizeTiny }
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: {
+                        var st = ExploreData.stationById(root.stationId)
+                        if (!st || !st.longitude || !st.latitude) {
+                            showToast(qsTr("该电站暂无坐标，无法导航"))
+                            return
+                        }
+                        root.stackView.push("qrc:/UserClient/qml/pages/NavRoutePage.qml", {
+                            fromLng: 116.397128, fromLat: 39.916527,   // 模拟定位（北京·朝阳）
+                            toLng: Number(st.longitude), toLat: Number(st.latitude),
+                            toName: st.name || qsTr("目的地")
+                        })
+                    }
+                }
             }
         }
     }
@@ -219,4 +242,22 @@ Item {
         interval: 2600
         onTriggered: root.launch()
     }
+    // 轻提示
+    Rectangle {
+        id: toast
+        visible: false
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom; anchors.bottomMargin: 96
+        width: Math.min(toastText.implicitWidth + 32, root.width - 48)
+        height: 40; radius: 20
+        color: "#B3000000"
+        Text {
+            id: toastText
+            anchors.centerIn: parent
+            text: ""
+            color: "#ffffff"; font.pixelSize: Theme.fontSizeSmall
+        }
+    }
+    Timer { id: toastTimer; interval: 2000; onTriggered: toast.visible = false }
+    function showToast(msg) { toastText.text = msg; toast.visible = true; toastTimer.restart() }
 }

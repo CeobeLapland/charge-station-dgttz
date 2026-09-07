@@ -44,7 +44,8 @@ Item {
         return hhmm(d) + "（" + (sl.label || "") + "）"
     }
 
-    // 提交 → ChargingFlow.startCharge（真正决策在 mock 服务端）
+    // 提交 → ChargingFlow.startCharge（真正决策在 mock/服务端，join 响应异步返回）
+    property bool submitting: false   // 提交在途：等 phase 变为 scan_pending/queued 再跳页
     function submit() {
         var v = vehicles[vehicleIndex] || {}
         var expect = ""
@@ -55,18 +56,27 @@ Item {
             else { d.setTime(d.getTime() + sl.deltaMin * 60000) }
             expect = hhmm(d)
         }
+        root.submitting = true
         ChargingFlow.startCharge(stationId, reserveType, expect,
                                  Number(v.id || 0), targetSoc, speed)
-        // 触发后根据 mock 服务端决策切换页面
-        root.navAfterSubmit()
     }
-    function navAfterSubmit() {
-        if (ChargingFlow.phase === "scan_pending")
-            stackView.push("qrc:/UserClient/qml/pages/ReservedPage.qml")
-        else if (ChargingFlow.phase === "queued")
-            stackView.push("qrc:/UserClient/qml/pages/QueuePage.qml")
-        else
-            showToast("预留失败，请重试")
+    Connections {
+        target: ChargingFlow
+        function onStateChanged() {
+            if (!root.submitting) return
+            if (ChargingFlow.phase === "scan_pending") {
+                root.submitting = false
+                stackView.push("qrc:/UserClient/qml/pages/ReservedPage.qml")
+            } else if (ChargingFlow.phase === "queued") {
+                root.submitting = false
+                stackView.push("qrc:/UserClient/qml/pages/QueuePage.qml")
+            }
+        }
+        function onAbnormal(title, sub) {
+            if (!root.submitting) return
+            root.submitting = false
+            showToast(title + "：" + sub)
+        }
     }
 
     Rectangle { anchors.fill: parent; color: Theme.background }

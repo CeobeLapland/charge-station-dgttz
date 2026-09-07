@@ -15,6 +15,8 @@ public:
     static QJsonObject users(const QString& keyword);
     static QJsonObject addStation(const QJsonObject& station);
     static QJsonObject chargerRestart(int chargerId);
+    static QJsonObject chargerPause(int chargerId);
+    static QJsonObject addCharger(const QJsonObject& charger);
     static QJsonObject toggleUserStatus(int userId, const QString& status);
     static QJsonObject deviceLogs(int chargerId);
     static QJsonObject healthRanks();

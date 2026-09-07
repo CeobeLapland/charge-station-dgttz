@@ -5,6 +5,11 @@
 #include <QSettings>
 #include <QQmlEngine>
 #include <QQmlError>
+#include <QJsonArray>
+#include <QJsonObject>
+#include <QJsonValue>
+#include <QVariantList>
+#include <QVariantMap>
 #include <QtQml/qqml.h>
 #include <QtWebEngineQuick/qtwebenginequickglobal.h>
 
@@ -15,6 +20,15 @@
 #include "UserData.h"
 #include "ChatData.h"
 #include "ChargingFlow.h"
+
+// 把 QJsonValue 里的数组转 QVariantList（桥接层用）
+static QVariantList jsonArrayToList(const QJsonValue& v) {
+    QVariantList out;
+    const QJsonArray arr = v.toArray();
+    for (const auto& e : arr)
+        out.append(e.toVariant());
+    return out;
+}
 
 int main(int argc, char *argv[]) {
     // 探索页地图使用 QtWebEngine 加载 MapLibre GL JS，需在创建 QGuiApplication 前初始化。
@@ -85,6 +99,148 @@ int main(int argc, char *argv[]) {
     static ChargingFlow chargingFlow;
     chargingFlow.setDataSources(&exploreData, &userData);
     qmlRegisterSingletonInstance("UserClient", 1, 0, "ChargingFlow", &chargingFlow);
+
+    // ==================== 数据桥接（BackendBridge，main.cpp 内联实现）====================
+    // 原则：QML 绑定不动。服务端响应经桥接到 UserData / ChargingFlow 的缓存 + changed 信号，
+    // 页面监听刷新；服务端缺的字段/城市不匹配（电站/天气在沈阳，客户端在北京）保留本地种子兜底。
+    // 启动即连服务端；登录成功后批量拉个人域数据。
+    client.connectServer(QString());
+
+    // 注入发送钩子：本地变更 → 同步发协议消息（未连接时 UserClient::send 静默丢弃）
+    userData.setBackendSender([&client](const QString& type, const QVariantMap& payload) {
+        if (client.isConnected())
+            client.sendMap(type, payload);
+    });
+    chargingFlow.setBackendSender([&client](const QString& type, const QVariantMap& payload) {
+        if (client.isConnected())
+            client.sendMap(type, payload);
+    });
+
+    // 登录成功后批量拉取个人域数据（每类响应对应一条 apply* 回写）
+    const auto pullUserData = [&client]() {
+        client.send(QStringLiteral("user.info"), QJsonObject());
+        client.send(QStringLiteral("order.list"), QJsonObject());
+        client.send(QStringLiteral("vehicle.list"), QJsonObject());
+        client.send(QStringLiteral("coupon.list"), QJsonObject());
+        client.send(QStringLiteral("point.list"), QJsonObject());
+        client.send(QStringLiteral("plan.list"), QJsonObject());
+        client.send(QStringLiteral("plan.my"), QJsonObject());
+        client.send(QStringLiteral("notification.list"), QJsonObject());
+        client.send(QStringLiteral("favorite.list"), QJsonObject());
+        client.send(QStringLiteral("review.list"), QJsonObject());  // 不带 station_id = 我的评价
+    };
+
+    // 连接状态 → 充电流程在线标志（在线走服务端，离线回退本地 mock）
+    QObject::connect(&client, &UserClient::connected, &app, [&]() {
+        chargingFlow.setBackendOnline(true);
+        // 电站数据接线：拉取附近电站（探索/首页共用；坐标=客户端模拟定位北京，
+        // 服务端按距离返回其库内电站，覆盖本地种子 → 预约 station_id 才与服务端一致）
+        client.send(QStringLiteral("station.nearby"),
+                    QJsonObject{{"longitude", 116.40}, {"latitude", 39.90}});
+        // 自动登录：本地存了勾选「自动登录」的手机号 → 服务端免密登录
+        const QString acc = authStore.autoLoginAccount();
+        if (!acc.isEmpty())
+            client.login(acc);
+    });
+    QObject::connect(&client, &UserClient::disconnected, &app, [&]() {
+        chargingFlow.setBackendOnline(false);
+    });
+
+    // 服务端响应路由：type_resp → 各数据源 apply*；push.* → ChargingFlow
+    QObject::connect(&client, &UserClient::messageReceived, &app,
+                     [&](const QString& type, int code, const QString& message,
+                         const QJsonObject& payload) {
+        // 充电流程链路：无论成败都先喂给 ChargingFlow（错误走 abnormal 提示）
+        if (type == QStringLiteral("reservation.join_resp")
+            || type == QStringLiteral("reservation.cancel_resp")
+            || type == QStringLiteral("push.reservation_notify")
+            || type == QStringLiteral("order.create_resp")
+            || type == QStringLiteral("order.start_resp")
+            || type == QStringLiteral("order.finish_resp")
+            || type == QStringLiteral("order.settle_resp")
+            || type == QStringLiteral("order.cancel_resp")
+            || type == QStringLiteral("push.order_progress")) {
+            chargingFlow.onBackendMessage(type, code, message, payload.toVariantMap());
+        }
+        if (code != 0)
+            return;  // 个人域数据只回写成功响应
+
+        const auto obj = payload.toVariantMap();
+
+        if (type == QStringLiteral("user.login_resp")) {
+            const QVariantMap user = obj.value(QStringLiteral("user")).toMap();
+            if (!user.isEmpty()) {
+                userData.applyUser(user);
+                // 服务端身份绑定在连接上；本地记当前账号以驱动 Main.qml 切主界面
+                const QString phone = user.value(QStringLiteral("phone")).toString();
+                if (!phone.isEmpty() && phone != authStore.currentAccount())
+                    authStore.login(phone);
+                pullUserData();
+            }
+        } else if (type == QStringLiteral("user.info_resp")) {
+            userData.applyUser(obj.value(QStringLiteral("user")).toMap());
+            userData.applyPortrait(obj.value(QStringLiteral("portrait")).toMap());
+        } else if (type == QStringLiteral("user.update_profile_resp")) {
+            userData.applyUser(obj.value(QStringLiteral("user")).toMap());
+        } else if (type == QStringLiteral("user.recharge_resp")) {
+            userData.applyUser(obj.value(QStringLiteral("user")).toMap());
+            userData.applyBalance(obj.value(QStringLiteral("balance")).toDouble());
+        } else if (type == QStringLiteral("order.list_resp")) {
+            userData.applyOrders(jsonArrayToList(payload.value(QStringLiteral("orders"))));
+        } else if (type == QStringLiteral("order.detail_resp")) {
+            userData.applyOrderDetail(obj.value(QStringLiteral("order")).toMap(),
+                                      jsonArrayToList(payload.value(QStringLiteral("timeline"))));
+        } else if (type == QStringLiteral("order.settle_resp")) {
+            userData.ingestOrder(obj.value(QStringLiteral("order")).toMap());
+            userData.applyBalance(obj.value(QStringLiteral("balance")).toDouble());
+            userData.applyPoints(obj.value(QStringLiteral("total_points")).toDouble());
+        } else if (type == QStringLiteral("order.create_resp")
+                   || type == QStringLiteral("order.start_resp")
+                   || type == QStringLiteral("order.finish_resp")
+                   || type == QStringLiteral("order.cancel_resp")) {
+            userData.ingestOrder(obj.value(QStringLiteral("order")).toMap());
+        } else if (type == QStringLiteral("vehicle.list_resp")) {
+            userData.applyVehicles(jsonArrayToList(payload.value(QStringLiteral("vehicles"))));
+        } else if (type == QStringLiteral("vehicle.add_resp")
+                   || type == QStringLiteral("vehicle.update_resp")
+                   || type == QStringLiteral("vehicle.delete_resp")) {
+            client.send(QStringLiteral("vehicle.list"), QJsonObject());  // 变更后重拉
+        } else if (type == QStringLiteral("coupon.list_resp")) {
+            userData.applyCoupons(jsonArrayToList(payload.value(QStringLiteral("coupons"))));
+        } else if (type == QStringLiteral("coupon.claim_resp")) {
+            client.send(QStringLiteral("coupon.list"), QJsonObject());
+        } else if (type == QStringLiteral("point.list_resp")) {
+            userData.applyPointRecords(jsonArrayToList(payload.value(QStringLiteral("records"))),
+                                       payload.value(QStringLiteral("total_points")).toDouble());
+        } else if (type == QStringLiteral("notification.list_resp")) {
+            userData.applyNotifications(jsonArrayToList(payload.value(QStringLiteral("notifications"))));
+        } else if (type == QStringLiteral("notification.read_resp")
+                   || type == QStringLiteral("notification.clear_resp")) {
+            client.send(QStringLiteral("notification.list"), QJsonObject());
+        } else if (type == QStringLiteral("plan.list_resp")) {
+            userData.applyMemberPlans(jsonArrayToList(payload.value(QStringLiteral("plans"))));
+        } else if (type == QStringLiteral("plan.my_resp")) {
+            userData.applyCurrentPlan(obj.value(QStringLiteral("plan")).toMap());
+        } else if (type == QStringLiteral("plan.subscribe_resp")) {
+            userData.applyCurrentPlan(obj.value(QStringLiteral("plan")).toMap());
+            userData.applyBalance(obj.value(QStringLiteral("balance")).toDouble());
+        } else if (type == QStringLiteral("favorite.list_resp")) {
+            userData.applyFavorites(jsonArrayToList(payload.value(QStringLiteral("favorites"))));
+        } else if (type == QStringLiteral("favorite.add_resp")
+                   || type == QStringLiteral("favorite.remove_resp")) {
+            client.send(QStringLiteral("favorite.list"), QJsonObject());
+        } else if (type == QStringLiteral("review.list_resp")) {
+            userData.applyMyReviews(jsonArrayToList(payload.value(QStringLiteral("reviews"))));
+        } else if (type == QStringLiteral("station.nearby_resp")) {
+            // 附近电站 → 覆盖探索/首页站表（ExploreData 内补全展示兜底字段）
+            exploreData.applyStations(jsonArrayToList(payload.value(QStringLiteral("stations"))));
+        } else if (type == QStringLiteral("station.detail_resp")) {
+            // 电站详情 → 回填该站电桩（真实桩 id/状态，预约匹配/详情展示用）
+            const QVariantMap st = obj.value(QStringLiteral("station")).toMap();
+            exploreData.applyChargers(st.value(QStringLiteral("id")).toInt(),
+                                      jsonArrayToList(payload.value(QStringLiteral("chargers"))));
+        }
+    });
 
     const QUrl url(QStringLiteral("qrc:/UserClient/qml/Main.qml"));
     QObject::connect(

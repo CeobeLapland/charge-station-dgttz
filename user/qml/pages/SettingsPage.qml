@@ -12,6 +12,26 @@ Item {
     // —— 当前选中 preset 的 index（初始值依据 authStore.mapTileSource 在 onCompleted 里同步）——
     property int presetIndex: 0
 
+    // 默认充电模式选项
+    readonly property var chargeModes: [
+        { id: "fast", name: qsTr("快充优先") },
+        { id: "standard", name: qsTr("标准速度") },
+        { id: "full", name: qsTr("稳定慢充") }
+    ]
+
+    function chargeModeNames() {
+        var arr = []
+        for (var i = 0; i < root.chargeModes.length; i++)
+            arr.push(root.chargeModes[i].name)
+        return arr
+    }
+    function chargeModeIndex() {
+        for (var i = 0; i < root.chargeModes.length; i++)
+            if (root.chargeModes[i].id === authStore.chargeMode) return i
+        return 0
+    }
+    function chargeModeId(idx) { return root.chargeModes[idx].id }
+
     Component.onCompleted: syncPresetIndex()
     Connections {
         target: authStore
@@ -143,6 +163,63 @@ Item {
                 }
             }
 
+            // —— 通知设置 ——
+            SectionCard { title: qsTr("通知设置") }
+            ToggleRow { title: qsTr("充电完成提醒"); sub: qsTr("充电结束后推送通知"); on: authStore.notifyChargeDone; onChanged: (o) => authStore.notifyChargeDone = o }
+            ToggleRow { title: qsTr("订单进度通知"); sub: qsTr("预约、充电、结算等动态提醒"); on: authStore.notifyOrder; onChanged: (o) => authStore.notifyOrder = o }
+            ToggleRow { title: qsTr("优惠活动推送"); sub: qsTr("接收优惠券与充值活动信息"); on: authStore.notifyPromo; onChanged: (o) => authStore.notifyPromo = o }
+
+            // —— 充电偏好 ——
+            SectionCard { title: qsTr("充电偏好") }
+            ToggleRow { title: qsTr("充满自动断电"); sub: qsTr("电量到 100% 自动停止，防止过充"); on: authStore.autoStop; onChanged: (o) => authStore.autoStop = o }
+
+            Column {
+                width: parent.width
+                spacing: 8
+                Text {
+                    text: qsTr("默认充电模式")
+                    font.pixelSize: Theme.fontSizeSmall; font.bold: true; color: Theme.textPrimary
+                }
+                ComboBox {
+                    id: chargeModeCombo
+                    width: parent.width
+                    model: root.chargeModeNames()
+                    currentIndex: root.chargeModeIndex()
+                    background: Rectangle { color: Theme.card; border.color: Theme.border; border.width: 1; radius: Theme.radiusSmall }
+                    contentItem: Text {
+                        text: chargeModeCombo.displayText
+                        color: Theme.textPrimary; font.pixelSize: Theme.fontSizeBase
+                        leftPadding: 12; verticalAlignment: Text.AlignVCenter
+                    }
+                    onActivated: function(idx){ authStore.chargeMode = root.chargeModeId(idx) }
+                }
+            }
+
+            // 低电量提醒阈值
+            Column {
+                width: parent.width
+                spacing: 8
+                Text {
+                    text: qsTr("低电量提醒阈值：") + authStore.lowBatteryThreshold + qsTr("%")
+                    font.pixelSize: Theme.fontSizeSmall; font.bold: true; color: Theme.textPrimary
+                }
+                Slider {
+                    width: parent.width
+                    from: 5; to: 30; stepSize: 5
+                    value: authStore.lowBatteryThreshold
+                    onValueChanged: authStore.lowBatteryThreshold = value
+                }
+                Text {
+                    text: qsTr("车辆电量低于该阈值时，自动推送补电提醒")
+                    width: parent.width
+                    font.pixelSize: Theme.fontSizeTiny; color: Theme.textSecondary
+                }
+            }
+
+            // —— 隐私与数据 ——
+            SectionCard { title: qsTr("隐私与数据") }
+            ToggleRow { title: qsTr("参与大屏互动展示"); sub: qsTr("允许在运营大屏匿名展示我的充电统计"); on: authStore.shareToScreen; onChanged: (o) => authStore.shareToScreen = o }
+
             // —— 退出按钮 ——
         }
     }
@@ -174,6 +251,46 @@ Item {
             font.pixelSize: Theme.fontSizeSmall
             font.bold: true
             color: Theme.textPrimary
+        }
+    }
+
+    // 开关行（标题 + 副标题 + 右侧 Switch）
+    component ToggleRow: Rectangle {
+        id: tr
+        property string title
+        property string sub
+        property bool on: false
+        signal changed(bool on)
+        width: parent.width
+        height: col.implicitHeight + 18
+        color: Theme.card
+        border.color: Theme.border; border.width: 1
+        radius: Theme.radiusSmall
+
+        Column {
+            id: col
+            anchors.left: parent.left; anchors.leftMargin: 14
+            anchors.right: parent.right; anchors.rightMargin: 62
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: 3
+            Text {
+                width: parent.width
+                text: tr.title
+                color: Theme.textPrimary; font.pixelSize: Theme.fontSizeSmall; font.bold: true
+                elide: Text.ElideRight
+            }
+            Text {
+                width: parent.width
+                text: tr.sub
+                color: Theme.textSecondary; font.pixelSize: Theme.fontSizeTiny
+                wrapMode: Text.Wrap
+            }
+        }
+        Switch {
+            anchors.right: parent.right; anchors.rightMargin: 12
+            anchors.verticalCenter: parent.verticalCenter
+            Component.onCompleted: checked = tr.on
+            onToggled: tr.changed(checked)
         }
     }
 }

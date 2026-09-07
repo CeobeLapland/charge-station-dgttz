@@ -13,6 +13,9 @@ public:
 private slots:
     void refresh();
     void onRestart();
+    void onPause();
+    void onAddCharger();
+    void appendLog(const QString& text);
 
 private:
     ApiClient* m_api = nullptr;

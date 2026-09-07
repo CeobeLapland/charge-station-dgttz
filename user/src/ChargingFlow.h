@@ -5,6 +5,8 @@
 #include <QTimer>
 #include <QVariantMap>
 
+#include <functional>
+
 class ExploreData;
 class UserData;
 
@@ -41,6 +43,16 @@ public:
 
     // 数据源注入：ExploreData 充当「种子 DB」，UserData 充当「用户域」。mock 服务端决策依赖它们。
     void setDataSources(ExploreData* explore, UserData* user) { m_explore = explore; m_user = user; }
+
+    // —— 接线：注入服务端发送器与在线状态（main.cpp 设置；在线走 WebSocket，离线保留本地 mock）——
+    void setBackendSender(std::function<void(const QString&, const QVariantMap&)> sender) {
+        m_sendBackend = std::move(sender);
+    }
+    void setBackendOnline(bool on) { m_backendOnline = on; }
+
+    // —— 接线：服务端响应/推送统一入口（main.cpp 数据桥调用）——
+    void onBackendMessage(const QString& type, int code, const QString& message,
+                          const QVariantMap& payload);
 
     QString phase() const { return m_phase; }
     QVariantMap flow() const { return m_flow; }
@@ -95,6 +107,18 @@ private:
     void mockSettle(int couponId);
     void mockApplyPenalty(qreal penalty, int creditLoss, const QString& reason);
 
+    // —— 接线：服务端响应处理 ——
+    void handleJoinMatched(const QVariantMap& reservation);  // reservation.join_resp（有空桩直接匹配）
+    void handleJoinQueued(const QVariantMap& reservation, const QVariantMap& queue);
+    void handleReservationNotify(const QVariantMap& payload); // push.reservation_notify（轮到你了）
+    void handleOrderCreated(int orderId);                     // order.create_resp → 发 order.start
+    void handleOrderStarted(const QVariantMap& order);        // order.start_resp → charging
+    void handleOrderFinished(const QVariantMap& order);       // order.finish_resp → settle
+    void handleOrderSettled(const QVariantMap& order, const QVariantMap& extra); // order.settle_resp → done
+    void handleOrderProgress(const QVariantMap& p);           // push.order_progress
+    void applyOrderToFlow(const QVariantMap& order);          // 服务端 order 字段回填 m_flow（补空不覆盖）
+    void backToMockFallback(const QString& msg);              // 服务端错误时的提示统一出口
+
     // 当前时段电价（元/kWh，含服务费）：按 price_rule 的 time_range 取当前档
     double currentUnitPrice() const;
 
@@ -115,4 +139,11 @@ private:
     QTimer m_scanTickTimer;      // 扫码倒计时秒针（展示用）
     QTimer m_progressTimer;      // 充电进度
     QTimer m_occupyTimer;        // 占位计时
+
+    // —— 接线成员 ——
+    std::function<void(const QString&, const QVariantMap&)> m_sendBackend;
+    bool m_backendOnline = false;
+    int m_reservationId = 0;     // 服务端预约 id（reservation.cancel 用）
+    int m_orderId = 0;           // 服务端订单 id（order.start/finish/settle/cancel 用）
+    QString m_chargedAt;         // 开始充电时间（本地算时长用，服务端 push 无 duration）
 };

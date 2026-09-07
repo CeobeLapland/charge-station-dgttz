@@ -3,6 +3,8 @@
 #include <QDateTime>
 #include <QTime>
 
+#include <utility>
+
 #include "ExploreData.h"
 #include "UserData.h"
 
@@ -17,6 +19,14 @@ constexpr int    kCancelFreeSec = 20;        // 主动取消免费窗口（占�
 constexpr qreal  kCancelLatePenalty = 5.0;   // 临近扫码截止取消违约金（元）
 constexpr int    kCancelLateCreditLoss = 2;  // 临近取消信用扣减
 constexpr double kStartSocDefault = 20.0;    // 起始电量（示例无车辆实时电量，用默认值）
+
+// 便捷构造 QVariantMap（接线消息 payload 用）
+QVariantMap S(const std::initializer_list<std::pair<QString, QVariant>>& list) {
+    QVariantMap m;
+    for (const auto& kv : list)
+        m.insert(kv.first, kv.second);
+    return m;
+}
 } // namespace
 
 ChargingFlow::ChargingFlow(QObject* parent)
@@ -54,6 +64,21 @@ void ChargingFlow::startCharge(int stationId, const QString& reserveType,
     m_scanTimer.stop();
     m_progressTimer.stop();
     m_occupyTimer.stop();
+
+    // 级联拦截（先于预约请求）：有未完成订单（待结算/已预约）时不能再次预约。
+    // 与服务端 joinQueue/createOrder 的 2001 规则一致；这里在用户端提前提示，避免扫码后才报错。
+    if (m_user) {
+        const QVariantList all = m_user->orders();
+        for (const QVariant& v : all) {
+            const QString st = v.toMap().value(QStringLiteral("status")).toString();
+            if (st == QStringLiteral("pending_settle")
+                || st == QStringLiteral("reserved")) {
+                emit abnormal(QStringLiteral("您有未付款账单"),
+                              QStringLiteral("请先完成结算后再预约"));
+                return;
+            }
+        }
+    }
 
     const QVariantMap st = m_explore ? m_explore->stationById(stationId) : QVariantMap();
     QVariantMap vehicle;
@@ -104,7 +129,15 @@ void ChargingFlow::startCharge(int stationId, const QString& reserveType,
     m_flow.insert(QStringLiteral("unit_price"), currentUnitPrice());
 
     // 级联鉴权：未完成订单 / 冻结 由服务端校验（示例阶段在此模拟拦截）
-    mockReserve(speed);
+    // 接线：在线 → reservation.join（服务端排队/匹配）；离线 → 本地 mock
+    // 先把阶段重置为 idle：在线 join 响应是异步的（handleJoinMatched/Queued 只认 idle/queued），
+    // 若上一次流程停在 cancelled/done，不重置会导致预约结果被静默丢弃。
+    setPhase(QStringLiteral("idle"));
+    if (m_backendOnline && m_sendBackend) {
+        m_sendBackend(QStringLiteral("reservation.join"), S({{"station_id", stationId}}));
+    } else {
+        mockReserve(speed);
+    }
 }
 
 // —— mock 服务端：reservation.join ——
@@ -216,7 +249,7 @@ void ChargingFlow::mockScanTimeout() {
                   QStringLiteral("桩已释放，产生违约金 ¥5、信用分 -5"));
 }
 
-// —— 取消预约/排队：reservation.cancel ——
+// —— 取消预约/排队：reservation.cancel / order.cancel ——
 void ChargingFlow::cancel() {
     m_queueTimer.stop();
     m_scanTimer.stop();
@@ -227,7 +260,7 @@ void ChargingFlow::cancel() {
     } else if (m_phase == QStringLiteral("scan_pending")) {
         const int remaining = m_flow.value(QStringLiteral("scan_remaining_sec")).toInt();
         m_flow.insert(QStringLiteral("cancel_reason"), QStringLiteral("user_cancel"));
-        // 主动取消：距扫码截止尚有较多时间免费；临近截止再取消需付违约金 + 扣信用
+        // 主动取消：距扫码截止尚有较多时间免费；临近截止再取消需付违约金 + 扣信用（服务端无对应计费，保留本地演示）
         if (remaining <= kCancelFreeSec) {
             mockApplyPenalty(kCancelLatePenalty, kCancelLateCreditLoss,
                              QStringLiteral("user_cancel_late"));
@@ -238,11 +271,22 @@ void ChargingFlow::cancel() {
             reason = QStringLiteral("已取消预约，桩已释放（免费）");
         }
     }
+    // 接线：在线时同步通知服务端释放预约/取消订单（本地立即退出，响应不回写 UI）
+    if (m_backendOnline && m_sendBackend) {
+        if ((m_phase == QStringLiteral("queued") || m_phase == QStringLiteral("scan_pending"))
+            && m_reservationId > 0) {
+            m_sendBackend(QStringLiteral("reservation.cancel"),
+                          S({{"reservation_id", m_reservationId}}));
+        } else if ((m_phase == QStringLiteral("charging") || m_phase == QStringLiteral("settle"))
+                   && m_orderId > 0) {
+            m_sendBackend(QStringLiteral("order.cancel"), S({{"order_id", m_orderId}}));
+        }
+    }
     setPhase(QStringLiteral("cancelled"));
     emit abnormal(QStringLiteral("已取消预约"), reason);
 }
 
-// —— 扫码确认：校验一致性后 order.start ——
+// —— 扫码确认：校验一致性后 order.create → order.start（在线） / 本地直接充电（离线）——
 bool ChargingFlow::confirmScan(int stationId, const QString& code) {
     if (m_phase != QStringLiteral("scan_pending"))
         return false;
@@ -254,6 +298,14 @@ bool ChargingFlow::confirmScan(int stationId, const QString& code) {
         emit abnormal(QStringLiteral("桩码不匹配"),
                       QStringLiteral("请扫描分配桩 ") + m_flow.value(QStringLiteral("charger_code")).toString());
         return false;
+    }
+    if (m_backendOnline && m_sendBackend) {
+        // order.create → 拿到 order_id 后再 order.start（handleOrderCreated 里续发）
+        m_sendBackend(QStringLiteral("order.create"), S({
+            {"station_id", m_flow.value(QStringLiteral("station_id"))},
+            {"charger_id", m_flow.value(QStringLiteral("charger_id"))},
+        }));
+        return true;
     }
     mockStartCharging();
     return true;
@@ -274,6 +326,11 @@ void ChargingFlow::mockStartCharging() {
 }
 
 void ChargingFlow::finishCharging() {
+    if (m_backendOnline && m_sendBackend && m_orderId > 0) {
+        // order.finish：服务端用仿真电量结算，客户端不传 end_soc
+        m_sendBackend(QStringLiteral("order.finish"), S({{"order_id", m_orderId}}));
+        return;
+    }
     mockFinishCharging(true);
 }
 
@@ -354,9 +411,14 @@ void ChargingFlow::mockOccupyTick() {
     emit stateChanged();
 }
 
-// —— 结算：order.settle ——
+// —— 结算：order.settle（在线） / 本地 mock（离线）——
 void ChargingFlow::settle(int couponId) {
     m_occupyTimer.stop();
+    if (m_backendOnline && m_sendBackend && m_orderId > 0) {
+        // 服务端扣款并回写 balance/points；券/积分抵扣由服务端口径为准（本页选中券仅本地展示）
+        m_sendBackend(QStringLiteral("order.settle"), S({{"order_id", m_orderId}}));
+        return;
+    }
     double amount = m_flow.value(QStringLiteral("amount")).toDouble();
     double discount = 0.0;
     QString couponLabel;
@@ -395,6 +457,31 @@ void ChargingFlow::settle(int couponId) {
         m_user->recharge(-total);
         m_flow.insert(QStringLiteral("balance_after"), bal - total);
     }
+    // 离线结算：把本单回写为已完成订单（在线由 order.settle_resp → ingestOrder 处理，这里同样走 ingestOrder
+    // 触发 ordersChanged，让订单页「待支付」账单及时消失）
+    if (m_user) {
+        QVariantMap o;
+        o.insert(QStringLiteral("id"), m_orderId > 0 ? m_orderId
+                                                     : m_flow.value(QStringLiteral("order_id")));
+        o.insert(QStringLiteral("status"), QStringLiteral("completed"));
+        o.insert(QStringLiteral("station_id"), m_flow.value(QStringLiteral("station_id")));
+        o.insert(QStringLiteral("station_name"), m_flow.value(QStringLiteral("station_name")));
+        o.insert(QStringLiteral("station_address"), m_flow.value(QStringLiteral("station_address")));
+        o.insert(QStringLiteral("charger_code"), m_flow.value(QStringLiteral("charger_code")));
+        o.insert(QStringLiteral("charger_type"), m_flow.value(QStringLiteral("charger_type")));
+        o.insert(QStringLiteral("start_soc"), m_flow.value(QStringLiteral("start_soc")));
+        o.insert(QStringLiteral("end_soc"), m_flow.value(QStringLiteral("end_soc")));
+        o.insert(QStringLiteral("target_soc"), m_flow.value(QStringLiteral("target_soc")));
+        o.insert(QStringLiteral("energy_kwh"), m_flow.value(QStringLiteral("energy_kwh")));
+        o.insert(QStringLiteral("duration_min"), m_flow.value(QStringLiteral("duration_min")));
+        o.insert(QStringLiteral("amount"), m_flow.value(QStringLiteral("amount")));
+        o.insert(QStringLiteral("discount_amount"), m_flow.value(QStringLiteral("discount_amount")));
+        o.insert(QStringLiteral("pay_amount"), m_flow.value(QStringLiteral("pay_amount")));
+        o.insert(QStringLiteral("points_earned"), m_flow.value(QStringLiteral("points_earned")));
+        o.insert(QStringLiteral("start_time"), m_flow.value(QStringLiteral("reserved_time")));
+        o.insert(QStringLiteral("settle_time"), m_flow.value(QStringLiteral("settle_time")));
+        m_user->ingestOrder(o);
+    }
     setPhase(QStringLiteral("done"));
     emit stateChanged();
 }
@@ -413,6 +500,12 @@ void ChargingFlow::mockApplyPenalty(qreal penalty, int creditLoss, const QString
 void ChargingFlow::simulatePeel() {
     if (m_phase != QStringLiteral("charging"))
         return;
+    if (m_backendOnline && m_sendBackend && m_orderId > 0) {
+        m_sendBackend(QStringLiteral("order.finish"), S({{"order_id", m_orderId}}));
+        emit abnormal(QStringLiteral("充电中断"),
+                      QStringLiteral("检测到拔枪，按当前已充量转入结算"));
+        return;
+    }
     m_progressTimer.stop();
     mockFinishCharging(true);
     emit abnormal(QStringLiteral("充电中断"),
@@ -511,4 +604,241 @@ double ChargingFlow::currentUnitPrice() const {
         }
     }
     return fallback + service;
+}
+
+// ==================== 接线：服务端响应 / 推送路由 ====================
+
+void ChargingFlow::onBackendMessage(const QString& type, int code, const QString& message,
+                                    const QVariantMap& payload) {
+    // 服务端业务错误：统一走 abnormal 提示（如 2002 余额不足 / 3002 桩不可用）
+    if (code != 0) {
+        if (type == QStringLiteral("order.create_resp")
+            || type == QStringLiteral("order.start_resp")
+            || type == QStringLiteral("order.finish_resp")
+            || type == QStringLiteral("order.settle_resp")
+            || type == QStringLiteral("reservation.join_resp")
+            || type == QStringLiteral("reservation.cancel_resp")) {
+            backToMockFallback(message);
+        }
+        return;
+    }
+
+    if (type == QStringLiteral("reservation.join_resp")) {
+        const bool matched = payload.value(QStringLiteral("matched")).toBool();
+        const QVariantMap res = payload.value(QStringLiteral("reservation")).toMap();
+        if (matched)
+            handleJoinMatched(res);
+        else
+            handleJoinQueued(res, payload.value(QStringLiteral("queue")).toMap());
+    } else if (type == QStringLiteral("push.reservation_notify")) {
+        handleReservationNotify(payload);
+    } else if (type == QStringLiteral("order.create_resp")) {
+        const QVariantMap o = payload.value(QStringLiteral("order")).toMap();
+        handleOrderCreated(o.value(QStringLiteral("id")).toInt());
+    } else if (type == QStringLiteral("order.start_resp")) {
+        handleOrderStarted(payload.value(QStringLiteral("order")).toMap());
+    } else if (type == QStringLiteral("order.finish_resp")) {
+        handleOrderFinished(payload.value(QStringLiteral("order")).toMap());
+    } else if (type == QStringLiteral("order.settle_resp")) {
+        QVariantMap extra;
+        extra.insert(QStringLiteral("points"), payload.value(QStringLiteral("points")));
+        extra.insert(QStringLiteral("balance"), payload.value(QStringLiteral("balance")));
+        extra.insert(QStringLiteral("total_points"), payload.value(QStringLiteral("total_points")));
+        handleOrderSettled(payload.value(QStringLiteral("order")).toMap(), extra);
+    } else if (type == QStringLiteral("push.order_progress")) {
+        handleOrderProgress(payload);
+    }
+    // order.cancel_resp / reservation.cancel_resp：本地已置 cancelled，无需回写
+}
+
+// 服务端返回错误时的统一出口：提示后保持原阶段（不吞掉错误）
+void ChargingFlow::backToMockFallback(const QString& msg) {
+    emit abnormal(QStringLiteral("服务端返回错误"), msg);
+}
+
+// —— reservation.join_resp：有空桩直接匹配 → 扫码待启动 ——
+void ChargingFlow::handleJoinMatched(const QVariantMap& res) {
+    if (m_phase != QStringLiteral("idle") && m_phase != QStringLiteral("queued"))
+        return;
+    m_reservationId = res.value(QStringLiteral("id")).toInt();
+    const int stationId = m_flow.value(QStringLiteral("station_id")).toInt();
+    QVariantMap chosen;
+    if (m_explore) {
+        const QVariantList chargers = m_explore->chargersForStation(stationId);
+        const int cid = res.value(QStringLiteral("charger_id")).toInt();
+        for (const QVariant& v : chargers) {
+            const QVariantMap c = v.toMap();
+            if (c.value(QStringLiteral("id")).toInt() == cid) {
+                chosen = c;
+                break;
+            }
+        }
+    }
+    m_flow.insert(QStringLiteral("charger_id"), res.value(QStringLiteral("charger_id")));
+    m_flow.insert(QStringLiteral("charger_code"), res.value(QStringLiteral("charger_code")));
+    m_flow.insert(QStringLiteral("charger_type"),
+                  chosen.value(QStringLiteral("type"), m_flow.value(QStringLiteral("speed"))));
+    m_flow.insert(QStringLiteral("charger_power"),
+                  chosen.value(QStringLiteral("power"), 60));
+    m_flow.insert(QStringLiteral("reserved_time"),
+                  QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss")));
+    setPhase(QStringLiteral("scan_pending"));
+    mockStartScanDeadline();   // 服务端无超时推送，扫码窗口保留本地倒计时
+}
+
+// —— reservation.join_resp：无空桩 → 排队 ——
+void ChargingFlow::handleJoinQueued(const QVariantMap& res, const QVariantMap& queue) {
+    m_reservationId = res.value(QStringLiteral("id")).toInt();
+    m_flow.insert(QStringLiteral("queue_no"),
+                  queue.value(QStringLiteral("queue_no"), res.value(QStringLiteral("queue_no"))));
+    int waitMin = queue.value(QStringLiteral("ahead_count"), 0).toInt() * 6;
+    const QDateTime eta = QDateTime::fromString(
+        queue.value(QStringLiteral("estimate_start_time")).toString(),
+        QStringLiteral("yyyy-MM-dd HH:mm:ss"));
+    if (eta.isValid())
+        waitMin = qMax(1, static_cast<int>(QDateTime::currentDateTime().secsTo(eta) / 60.0 + 0.999));
+    m_flow.insert(QStringLiteral("estimate_wait_min"), waitMin);
+    setPhase(QStringLiteral("queued"));
+    // 服务端负责叫号（push.reservation_notify），本地不再自行推进队列
+}
+
+// —— push.reservation_notify：轮到你了 → 分配桩号 → 扫码待启动 ——
+void ChargingFlow::handleReservationNotify(const QVariantMap& payload) {
+    const QVariantMap res = payload.value(QStringLiteral("reservation")).toMap();
+    if (m_phase != QStringLiteral("queued") && m_phase != QStringLiteral("idle"))
+        return;
+    m_reservationId = res.value(QStringLiteral("id"), m_reservationId).toInt();
+    QVariantMap chosen;
+    if (m_explore) {
+        const int cid = payload.value(QStringLiteral("charger_id"), res.value(QStringLiteral("charger_id"))).toInt();
+        const QVariantList chargers = m_explore->chargersForStation(
+            payload.value(QStringLiteral("station_id"), m_flow.value(QStringLiteral("station_id"))).toInt());
+        for (const QVariant& v : chargers) {
+            const QVariantMap c = v.toMap();
+            if (c.value(QStringLiteral("id")).toInt() == cid) {
+                chosen = c;
+                break;
+            }
+        }
+    }
+    m_flow.insert(QStringLiteral("charger_id"),
+                  payload.value(QStringLiteral("charger_id"), res.value(QStringLiteral("charger_id"))));
+    m_flow.insert(QStringLiteral("charger_code"), res.value(QStringLiteral("charger_code")));
+    m_flow.insert(QStringLiteral("charger_type"),
+                  chosen.value(QStringLiteral("type"), m_flow.value(QStringLiteral("speed"))));
+    m_flow.insert(QStringLiteral("charger_power"), chosen.value(QStringLiteral("power"), 60));
+    m_flow.insert(QStringLiteral("reserved_time"),
+                  QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss")));
+    setPhase(QStringLiteral("scan_pending"));
+    mockStartScanDeadline();
+    emit reservationReady(payload.value(QStringLiteral("message")).toString());
+    emit abnormal(QStringLiteral("轮到您了"),
+                  QStringLiteral("已为您匹配 ") + m_flow.value(QStringLiteral("charger_code")).toString());
+}
+
+// —— order.create_resp：拿 order_id → 续发 order.start ——
+void ChargingFlow::handleOrderCreated(int orderId) {
+    if (orderId <= 0)
+        return;
+    m_orderId = orderId;
+    m_flow.insert(QStringLiteral("order_id"), orderId);
+    if (m_sendBackend)
+        m_sendBackend(QStringLiteral("order.start"), S({
+            {"order_id", orderId},
+            {"start_soc", kStartSocDefault},
+        }));
+}
+
+// —— order.start_resp：开始充电（进度由 push.order_progress 驱动，不启动本地进度定时器）——
+void ChargingFlow::handleOrderStarted(const QVariantMap& order) {
+    m_scanTimer.stop();
+    m_scanTickTimer.stop();
+    m_orderId = order.value(QStringLiteral("id"), m_orderId).toInt();
+    m_chargedAt = QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"));
+    applyOrderToFlow(order);
+    m_flow.insert(QStringLiteral("soc"), order.value(QStringLiteral("start_soc"), kStartSocDefault));
+    m_flow.insert(QStringLiteral("power_kw"), 0.0);
+    m_flow.insert(QStringLiteral("energy_kwh"), 0.0);
+    m_flow.insert(QStringLiteral("duration_min"), 0.0);
+    m_flow.insert(QStringLiteral("cost"), 0.0);
+    m_flow.insert(QStringLiteral("occupied"), true);
+    setPhase(QStringLiteral("charging"));
+}
+
+// —— push.order_progress：充电进度（每秒） / 充满自动结束 ——
+void ChargingFlow::handleOrderProgress(const QVariantMap& p) {
+    if (m_orderId > 0 && p.value(QStringLiteral("order_id")).toInt() != m_orderId)
+        return;   // 只认当前订单
+    if (m_phase != QStringLiteral("charging"))
+        return;
+    const double soc = p.value(QStringLiteral("soc")).toDouble();
+    m_flow.insert(QStringLiteral("soc"), soc);
+    m_flow.insert(QStringLiteral("power_kw"), p.value(QStringLiteral("power_kw")));
+    m_flow.insert(QStringLiteral("energy_kwh"), p.value(QStringLiteral("energy")));
+    m_flow.insert(QStringLiteral("cost"), p.value(QStringLiteral("cost")));
+    // 服务端 push 无时长字段，本地按开始充电时间折算
+    const QDateTime start = QDateTime::fromString(m_chargedAt, QStringLiteral("yyyy-MM-dd HH:mm:ss"));
+    if (start.isValid())
+        m_flow.insert(QStringLiteral("duration_min"),
+                      start.msecsTo(QDateTime::currentDateTime()) / 60000.0);
+    if (p.value(QStringLiteral("finished")).toBool()) {
+        m_flow.insert(QStringLiteral("end_soc"), soc);
+        setPhase(QStringLiteral("settle"));
+        mockStartOccupy();
+        emit abnormal(QStringLiteral("充电完成"),
+                      QStringLiteral("车辆已达到目标电量，请及时挪车，避免占位费"));
+        return;
+    }
+    emit stateChanged();
+}
+
+// —— order.finish_resp：结束充电 → 待结算 ——
+void ChargingFlow::handleOrderFinished(const QVariantMap& order) {
+    m_orderId = order.value(QStringLiteral("id"), m_orderId).toInt();
+    applyOrderToFlow(order);
+    // 结束电量以服务端结算值为准
+    if (order.contains(QStringLiteral("end_soc")))
+        m_flow.insert(QStringLiteral("soc"), order.value(QStringLiteral("end_soc")));
+    setPhase(QStringLiteral("settle"));
+    mockStartOccupy();
+}
+
+// —— order.settle_resp：结算成功 ——
+void ChargingFlow::handleOrderSettled(const QVariantMap& order, const QVariantMap& extra) {
+    // 订单页直接结算历史账单（非当前流程订单）时，不回写流程状态；
+    // 当前流程结算（ChargingFlow.settle → order.settle）的订单 id 一定等于 m_orderId
+    if (m_orderId <= 0 || order.value(QStringLiteral("id")).toInt() != m_orderId)
+        return;
+    m_occupyTimer.stop();
+    applyOrderToFlow(order);
+    if (extra.contains(QStringLiteral("points")))
+        m_flow.insert(QStringLiteral("points_earned"), extra.value(QStringLiteral("points")));
+    if (extra.contains(QStringLiteral("balance")))
+        m_flow.insert(QStringLiteral("balance_after"), extra.value(QStringLiteral("balance")));
+    m_flow.insert(QStringLiteral("settle_time"),
+                  order.value(QStringLiteral("settle_time"),
+                              QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"))));
+    setPhase(QStringLiteral("done"));
+}
+
+// 服务端 order 字段回填 m_flow：只补空，不覆盖本地 mock 展示值（站名/桩码等）
+void ChargingFlow::applyOrderToFlow(const QVariantMap& order) {
+    if (order.isEmpty())
+        return;
+    m_orderId = order.value(QStringLiteral("id"), m_orderId).toInt();
+    m_flow.insert(QStringLiteral("order_id"), m_orderId);
+    const QStringList keys = {
+        QStringLiteral("start_soc"), QStringLiteral("end_soc"), QStringLiteral("target_soc"),
+        QStringLiteral("energy_kwh"), QStringLiteral("amount"), QStringLiteral("discount_amount"),
+        QStringLiteral("pay_amount"), QStringLiteral("duration_min"), QStringLiteral("points_earned"),
+        QStringLiteral("start_time"), QStringLiteral("end_time"), QStringLiteral("create_time"),
+        QStringLiteral("settle_time"), QStringLiteral("price_level"),
+    };
+    for (const QString& k : keys) {
+        if (order.contains(k) && !m_flow.contains(k))
+            m_flow.insert(k, order.value(k));
+    }
+    // 开始时间：充电/结算展示统一用服务端 start_time
+    if (order.contains(QStringLiteral("start_time")))
+        m_flow.insert(QStringLiteral("reserved_time"), order.value(QStringLiteral("start_time")));
 }

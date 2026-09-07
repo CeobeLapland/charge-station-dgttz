@@ -156,7 +156,7 @@ Item {
                 onClicked: {
                     var cid = root.matchedCouponIndex >= 0 ? Number(root.coupons[root.matchedCouponIndex].id) : 0
                     ChargingFlow.settle(cid)
-                    if (ChargingFlow.phase === "done") root.showSuccess()
+                    // 结算为异步（在线等 order.settle_resp；离线 mock 同步），成功统一由 onStateChanged 判定
                 }
             }
         }
@@ -180,6 +180,9 @@ Item {
     }
     Connections {
         target: ChargingFlow
+        function onStateChanged() {
+            if (ChargingFlow.phase === "done") root.showSuccess()
+        }
         function onAbnormal(title, sub) {
             toastText.text = title + "：" + sub
             toast.visible = true
