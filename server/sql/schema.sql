@@ -69,7 +69,9 @@ CREATE TABLE IF NOT EXISTS station (
     owner_type     TEXT NOT NULL DEFAULT 'self_run'
                    CHECK (owner_type IN ('self_run','franchise','partner','third_party')),
     merchant_id    INTEGER REFERENCES merchant(id),     -- 自营为空
-    has_swap       INTEGER NOT NULL DEFAULT 0           -- 是否支持换电 0/1
+    has_swap       INTEGER NOT NULL DEFAULT 0,          -- 是否支持换电 0/1
+    status         TEXT NOT NULL DEFAULT 'active'
+                   CHECK (status IN ('active','frozen'))
 );
 
 -- 5. charger 充电桩

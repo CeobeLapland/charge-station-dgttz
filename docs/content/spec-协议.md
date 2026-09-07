@@ -82,6 +82,10 @@
 | `admin.login_resp` | S→C | 登录结果 | admin |
 | `admin.revenue` | C→S | 销售业绩（7/30 日） | days |
 | `admin.revenue_resp` | S→C | 营收趋势 + 指标 | trend[], today, month, total |
+| `admin.order_daily_stats` | C→S | 每日订单数与充电量 | — |
+| `admin.order_daily_stats_resp` | S→C | 每日统计 | days[] |
+| `admin.station_revenue_share` | C→S | 站点营收占比 | — |
+| `admin.station_revenue_share_resp` | S→C | 站点营收占比 | stations[], total |
 | `admin.station_status` | C→S | 电桩状态分布 | — |
 | `admin.station_status_resp` | S→C | 在用/闲置/故障分布 | distribution |
 | `admin.station_list` | C→S | 电站列表 | — |
@@ -90,12 +94,20 @@
 | `admin.station_detail_resp` | S→C | station, chargers[] | — |
 | `admin.station_add` | C→S | 新增电站 | station 字段 |
 | `admin.station_add_resp` | S→C | 新增结果 | station |
+| `admin.station_pause` | C→S | 冻结电站 | station_id |
+| `admin.station_pause_resp` | S→C | 冻结结果 | station |
+| `admin.station_resume` | C→S | 恢复电站 | station_id |
+| `admin.station_resume_resp` | S→C | 恢复结果 | station |
+| `admin.charger_add` | C→S | 给已有电站新增电桩 | station_id, type, power |
+| `admin.charger_add_resp` | S→C | 新增结果 | charger, station |
 | `admin.charger_list` | C→S | 电桩列表 | station_id? |
 | `admin.charger_list_resp` | S→C | chargers[] | — |
 | `admin.charger_restart` | C→S | 远程重启 | charger_id |
 | `admin.charger_restart_resp` | S→C | 指令接收结果 | charger_id |
 | `admin.charger_pause` | C→S | 暂停使用 | charger_id |
 | `admin.charger_pause_resp` | S→C | 暂停结果 | charger_id |
+| `admin.charger_resume` | C→S | 恢复电桩 | charger_id |
+| `admin.charger_resume_resp` | S→C | 恢复结果 | charger_id, status, device_log |
 | `admin.user_list` | C→S | 用户列表（可模糊搜索） | keyword? |
 | `admin.user_list_resp` | S→C | users[] | — |
 | `admin.user_toggle_status` | C→S | 冻结/解冻 | user_id, status |
@@ -202,6 +214,38 @@
 | `push.review` | S→大屏/管理端 | 新评价实时推送 | review |
 
 > 注：`order.settle` 可携带 `coupon_id` 完成券核销抵扣；抵扣时订单实付金额 = 应收 − 券面额。
+
+### 个人域（收藏 / 消息 / 积分 / 会员 / 券 / 评价）
+
+| type | 方向 | payload | 响应要点 |
+| ---- | ---- | ---- | ---- |
+| `favorite.list` | C→S | — | `favorites[]`（含站名、地址、经纬度、总桩数、空闲数）|
+| `favorite.add` | C→S | `station_id` | `station_id`, `favorited=true`；重复收藏幂等 |
+| `favorite.remove` | C→S | `station_id` | `station_id`, `favorited=false` |
+| `notification.list` | C→S | `limit?`（默认50）| `notifications[]`, `unread` |
+| `notification.read` | C→S | `notification_id?` | 省略或为 0 = **全部标记已读**；返回 `unread` |
+| `notification.clear` | C→S | — | `cleared`（删除条数）, `unread=0` |
+| `point.list` | C→S | `limit?`（默认50）| `records[]{id,change,reason,create_time}`, `total_points` |
+| `plan.list` | C→S | — | `plans[]`；**免登录** |
+| `plan.my` | C→S | — | `plan`（无有效套餐时为 `null`）|
+| `plan.subscribe` | C→S | `plan_id` | `plan`, `balance`；余额不足返回 `2002` |
+| `coupon.list` | C→S | `status?`（unused/used/expired）| `coupons[]`（我的）+ `claimable[]`（可领的模板）|
+| `coupon.claim` | C→S | `coupon_id` | `coupon`；重复领取或已下架返回 `4002` |
+| `review.list` | C→S | `station_id?`, `limit?` | 传 `station_id` = 该站公开评价（**免登录**）；不传 = 我的评价（需登录）|
+| `review.create` | C→S | `order_id`, `overall_score`, `speed_score?`, `device_score?`, `parking_score?`, `hygiene_score?`, `service_score?`, `tags?`, `content?` | `review`；只能评价自己**已完成**的订单，一单一次 |
+| `review.useful` | C→S | `review_id` | 点赞 +1 |
+| `weather.get` | C→S | `area?` | `weather{area,condition,temperature,forecast,update_time}`；不传 area 返回「全市」；**免登录** |
+| `faq.list` | C→S | `category?` | `faqs[]{id,category,question,answer,sort}`；**免登录** |
+
+**分项评分**可以省略，省略的项自动等于 `overall_score`。评分范围 1–5，超出会被截断。
+
+**新增推送**：`push.review` —— 有新评价时广播，管理端/大屏可实时刷新。
+
+**会员套餐生效后**：`user.level` 变成 `vip`，`user_plan` 里同一时间只保留一条 `active`（订阅新套餐会把旧的置为 `expired`）。订阅走事务：扣余额 + 写 user_plan + 记钱包流水。
+
+**几条免登录消息**：`plan.list` / `weather.get` / `faq.list` / `review.list`（带 station_id 时）。其余个人域消息都要先 `user.login`，否则返回 `1004`。
+
+
 
 ## 统计口径（服务端唯一定义，管理端与大屏必须一致）
 

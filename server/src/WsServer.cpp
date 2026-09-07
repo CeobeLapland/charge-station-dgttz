@@ -54,7 +54,7 @@ QJsonObject stationFullToJson(const StationFull &s)
         {"online_rate", std::round(s.onlineRate * 10) / 10.0},
         {"service_fee", s.serviceFee}, {"parking_fee", s.parkingFee},
         {"business_hours", s.businessHours}, {"facilities", facilities},
-        {"owner_type", s.ownerType}, {"has_swap", s.hasSwap},
+        {"owner_type", s.ownerType}, {"has_swap", s.hasSwap}, {"status", s.status},
     };
 }
 
@@ -227,15 +227,24 @@ QJsonObject WsServer::dispatch(QWebSocket *sock, const QString &type, const QJso
     // ---- 管理端 ----
     if (type == QStringLiteral("admin.login"))          return handleAdminLogin(sock, payload, code, message);
     if (type == QStringLiteral("admin.revenue"))        return handleAdminRevenue(sock, payload, code, message);
+    if (type == QStringLiteral("admin.order_daily_stats")) return handleAdminOrderDailyStats(sock, payload, code, message);
+    if (type == QStringLiteral("admin.station_revenue_share")) return handleAdminStationRevenueShare(sock, payload, code, message);
     if (type == QStringLiteral("admin.station_status")) return handleAdminStationStatus(sock, payload, code, message);
     if (type == QStringLiteral("admin.station_list"))   return handleAdminStationList(sock, payload, code, message);
     if (type == QStringLiteral("admin.station_detail")) return handleAdminStationDetail(sock, payload, code, message);
     if (type == QStringLiteral("admin.station_add"))    return handleAdminStationAdd(sock, payload, code, message);
+    if (type == QStringLiteral("admin.station_pause"))
+        return handleAdminStationStatusAction(sock, payload, code, message, QStringLiteral("frozen"));
+    if (type == QStringLiteral("admin.station_resume"))
+        return handleAdminStationStatusAction(sock, payload, code, message, QStringLiteral("active"));
+    if (type == QStringLiteral("admin.charger_add"))    return handleAdminChargerAdd(sock, payload, code, message);
     if (type == QStringLiteral("admin.charger_list"))   return handleAdminChargerList(sock, payload, code, message);
     if (type == QStringLiteral("admin.charger_restart"))
         return handleAdminChargerAction(sock, payload, code, message, QStringLiteral("restart"));
     if (type == QStringLiteral("admin.charger_pause"))
         return handleAdminChargerAction(sock, payload, code, message, QStringLiteral("pause"));
+    if (type == QStringLiteral("admin.charger_resume"))
+        return handleAdminChargerAction(sock, payload, code, message, QStringLiteral("resume"));
     if (type == QStringLiteral("admin.user_list"))      return handleAdminUserList(sock, payload, code, message);
     if (type == QStringLiteral("admin.user_toggle_status")) return handleAdminUserToggleStatus(sock, payload, code, message);
     if (type == QStringLiteral("admin.device_log"))     return handleAdminDeviceLog(sock, payload, code, message);
@@ -460,6 +469,34 @@ QJsonObject WsServer::handleAdminRevenue(QWebSocket *sock, const QJsonObject &pa
                        {"month", r.month}, {"total", r.total}};
 }
 
+// ---------- admin.order_daily_stats ----------
+QJsonObject WsServer::handleAdminOrderDailyStats(QWebSocket *sock, const QJsonObject &,
+                                                  int &code, QString &message)
+{
+    if (!requireAdmin(sock, code, message)) return {};
+    QJsonArray arr;
+    for (const auto &r : dao::orderDailyStats())
+        arr.append(QJsonObject{{"date", r.date}, {"order_count", r.orderCount},
+                               {"energy_kwh", std::round(r.energyKwh * 100.0) / 100.0}});
+    return QJsonObject{{"days", arr}};
+}
+
+// ---------- admin.station_revenue_share ----------
+QJsonObject WsServer::handleAdminStationRevenueShare(QWebSocket *sock, const QJsonObject &,
+                                                      int &code, QString &message)
+{
+    if (!requireAdmin(sock, code, message)) return {};
+    QJsonArray arr;
+    double total = 0.0;
+    for (const auto &r : dao::stationRevenueShare()) {
+        total += r.revenue;
+        arr.append(QJsonObject{{"station_id", r.stationId}, {"station_name", r.stationName},
+                               {"revenue", std::round(r.revenue * 100.0) / 100.0},
+                               {"share", std::round(r.share * 100.0) / 100.0}});
+    }
+    return QJsonObject{{"stations", arr}, {"total", std::round(total * 100.0) / 100.0}};
+}
+
 // ---------- admin.station_status: 电桩状态分布 ----------
 QJsonObject WsServer::handleAdminStationStatus(QWebSocket *sock, const QJsonObject &,
                                                int &code, QString &message)
@@ -540,6 +577,89 @@ QJsonObject WsServer::handleAdminStationAdd(QWebSocket *sock, const QJsonObject 
     return QJsonObject{{"station", stationFullToJson(*created)}};
 }
 
+// ---------- admin.charger_add ----------
+QJsonObject WsServer::handleAdminChargerAdd(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message)
+{
+    if (!requireAdmin(sock, code, message))
+        return {};
+
+    const int stationId = payload.value(QStringLiteral("station_id")).toInt();
+    const QString type = payload.value(QStringLiteral("type")).toString();
+    const double power = payload.value(QStringLiteral("power")).toDouble();
+
+    if (stationId <= 0) {
+        code = 9001;
+        message = QStringLiteral("station_id 无效");
+        return {};
+    }
+
+    if (type != QStringLiteral("fast") &&
+        type != QStringLiteral("slow")) {
+        code = 9001;
+        message = QStringLiteral("type 必须为 fast 或 slow");
+        return {};
+    }
+
+    if (power <= 0) {
+        code = 9001;
+        message = QStringLiteral("power 必须大于 0");
+        return {};
+    }
+
+    // 先单独检查电站是否存在，这样错误信息更准确
+    const auto station = dao::findStationFullById(stationId);
+    if (!station) {
+        code = 4001;
+        message = QStringLiteral("电站不存在: id=%1").arg(stationId);
+        return {};
+    }
+
+    const auto charger = dao::addCharger(stationId, type, power);
+    if (!charger) {
+        code = 4002;
+        message = QStringLiteral("新增电桩失败");
+        return {};
+    }
+
+    // DAO 已经更新 total_chargers，这里重新读取电站最新状态
+    const auto updatedStation = dao::findStationFullById(stationId);
+
+    message = QStringLiteral("新增成功");
+
+    QJsonObject result{
+        {"charger", chargerFullToJson(*charger)}
+    };
+
+    if (updatedStation)
+        result.insert(QStringLiteral("station"),
+                      stationFullToJson(*updatedStation));
+
+    return result;
+}
+
+// ---------- admin.station_pause / admin.station_resume ----------
+QJsonObject WsServer::handleAdminStationStatusAction(QWebSocket *sock, const QJsonObject &payload,
+                                                      int &code, QString &message,
+                                                      const QString &status)
+{
+    if (!requireAdmin(sock, code, message)) return {};
+    const int stationId = payload.value(QStringLiteral("station_id")).toInt();
+    if (stationId <= 0) {
+        code = 9001;
+        message = QStringLiteral("station_id 无效");
+        return {};
+    }
+    const auto station = dao::setStationStatus(stationId, status);
+    if (!station) {
+        code = 4001;
+        message = QStringLiteral("电站不存在或操作失败: id=%1").arg(stationId);
+        return {};
+    }
+    message = (status == QStringLiteral("frozen")) ? QStringLiteral("电站已冻结")
+                                                   : QStringLiteral("电站已恢复");
+    return QJsonObject{{"station", stationFullToJson(*station)}};
+}
+
 // ---------- admin.charger_list: station_id 可空(空=全部) ----------
 QJsonObject WsServer::handleAdminChargerList(QWebSocket *sock, const QJsonObject &payload,
                                              int &code, QString &message)
@@ -570,8 +690,10 @@ QJsonObject WsServer::handleAdminChargerAction(QWebSocket *sock, const QJsonObje
         }
         return {};
     }
-    const QString newStatus = (action == QStringLiteral("restart"))
-                                  ? QStringLiteral("rebooting") : QStringLiteral("offline");
+    const QString newStatus =
+        (action == QStringLiteral("restart")) ? QStringLiteral("rebooting") :
+        (action == QStringLiteral("pause"))   ? QStringLiteral("offline") :
+                                                QStringLiteral("idle");
 
     // 运维动作影响所有端看到的状态, 所以主动推送(spec: push.charger_status / push.device_log)
     broadcast(QStringLiteral("push.charger_status"),
@@ -580,7 +702,8 @@ QJsonObject WsServer::handleAdminChargerAction(QWebSocket *sock, const QJsonObje
               QJsonObject{{"device_log", deviceLogToJson(*log)}});
 
     message = (action == QStringLiteral("restart")) ? QStringLiteral("重启指令已下发")
-                                                    : QStringLiteral("已暂停使用");
+            : (action == QStringLiteral("pause"))   ? QStringLiteral("已暂停使用")
+                                                    : QStringLiteral("已恢复使用");
     return QJsonObject{{"charger_id", chargerId}, {"status", newStatus},
                        {"device_log", deviceLogToJson(*log)}};
 }

@@ -37,9 +37,10 @@ StationFull rowToStation(const QSqlQuery &q)
     s.facilitiesJson = q.value(10).toString();
     s.ownerType      = q.value(11).toString();
     s.hasSwap        = q.value(12).toInt();
-    s.freeChargers   = q.value(13).toInt();   // 实时 COUNT
-    const int online = q.value(14).toInt();   // 实时在线台数(非 offline/fault)
-    const int total  = q.value(15).toInt();   // 实时总台数
+    s.status         = q.value(13).toString();
+    s.freeChargers   = q.value(14).toInt();   // 实时 COUNT
+    const int online = q.value(15).toInt();   // 实时在线台数(非 offline/fault)
+    const int total  = q.value(16).toInt();   // 实时总台数
     // online_rate 不信任表里的存量字段, 实时算(见 server/AGENTS.md 的约定)
     s.onlineRate = (total > 0) ? (online * 100.0 / total) : 100.0;
     s.totalChargers = (total > 0) ? total : s.totalChargers;
@@ -49,7 +50,7 @@ StationFull rowToStation(const QSqlQuery &q)
 // 电站查询: 表字段 + 三个实时统计子查询
 const char *kSelectStation =
     "SELECT s.id, s.name, s.address, s.area, s.longitude, s.latitude, s.total_chargers, "
-    "       s.service_fee, s.parking_fee, s.business_hours, s.facilities, s.owner_type, s.has_swap, "
+    "       s.service_fee, s.parking_fee, s.business_hours, s.facilities, s.owner_type, s.has_swap, s.status, "
     "       (SELECT COUNT(*) FROM charger c WHERE c.station_id=s.id AND c.status='idle'), "
     "       (SELECT COUNT(*) FROM charger c WHERE c.station_id=s.id "
     "                                        AND c.status NOT IN ('offline','fault')), "
@@ -176,6 +177,49 @@ RevenueSummary revenue(int days)
         r.total = t.value(0).toDouble();
 
     return r;
+}
+
+QList<DailyOrderStat> orderDailyStats()
+{
+    QList<DailyOrderStat> out;
+    QSqlQuery q;
+    q.prepare(QStringLiteral(
+        "SELECT substr(settle_time,1,10) AS d, COUNT(*), ROUND(SUM(energy_kwh),2) "
+        "FROM charging_order WHERE status='completed' AND settle_time IS NOT NULL "
+        "GROUP BY d ORDER BY d"));
+    if (!q.exec()) return out;
+    while (q.next()) {
+        DailyOrderStat r;
+        r.date = q.value(0).toString();
+        r.orderCount = q.value(1).toInt();
+        r.energyKwh = q.value(2).toDouble();
+        out.append(r);
+    }
+    return out;
+}
+
+QList<StationRevenueStat> stationRevenueShare()
+{
+    QList<StationRevenueStat> out;
+    QSqlQuery q;
+    q.prepare(QStringLiteral(
+        "SELECT o.station_id, s.name, ROUND(SUM(o.pay_amount),2) AS revenue "
+        "FROM charging_order o JOIN station s ON s.id=o.station_id "
+        "WHERE o.status='completed' "
+        "GROUP BY o.station_id, s.name ORDER BY revenue DESC"));
+    if (!q.exec()) return out;
+    double total = 0.0;
+    while (q.next()) {
+        StationRevenueStat r;
+        r.stationId = q.value(0).toInt();
+        r.stationName = q.value(1).toString();
+        r.revenue = q.value(2).toDouble();
+        total += r.revenue;
+        out.append(r);
+    }
+    if (total > 0.0)
+        for (auto &r : out) r.share = r.revenue * 100.0 / total;
+    return out;
 }
 
 StatusDistribution chargerStatusDistribution()
@@ -305,10 +349,18 @@ QList<DeviceLogRow> listDeviceLogs(int chargerId)
 std::optional<DeviceLogRow> chargerAction(int chargerId, const QString &action,
                                           const QString &opAccount, bool *busyOut)
 {
-    // 目标状态: restart → rebooting, pause → offline
-    const QString newStatus = (action == QStringLiteral("restart"))
-                                  ? QStringLiteral("rebooting")
-                                  : QStringLiteral("offline");
+    QString newStatus;
+    QString logAction = action;
+    if (action == QStringLiteral("restart")) {
+        newStatus = QStringLiteral("rebooting");
+    } else if (action == QStringLiteral("pause")) {
+        newStatus = QStringLiteral("offline");
+    } else if (action == QStringLiteral("resume")) {
+        newStatus = QStringLiteral("idle");
+        logAction = QStringLiteral("repair");
+    } else {
+        return std::nullopt;
+    }
 
     QSqlQuery exists;
     exists.prepare(QStringLiteral("SELECT id FROM charger WHERE id = ?"));
@@ -346,7 +398,7 @@ std::optional<DeviceLogRow> chargerAction(int chargerId, const QString &action,
         "INSERT INTO device_log(charger_id, action, operator, op_time, result) "
         "VALUES(?, ?, ?, ?, 'success')"));
     ins.addBindValue(chargerId);
-    ins.addBindValue(action);
+    ins.addBindValue(logAction);
     ins.addBindValue(opAccount);
     ins.addBindValue(nowStr());
     if (!ins.exec()) {
@@ -365,6 +417,19 @@ std::optional<DeviceLogRow> chargerAction(int chargerId, const QString &action,
     l.opTime    = nowStr();
     l.result    = QStringLiteral("success");
     return l;
+}
+
+std::optional<StationFull> setStationStatus(int stationId, const QString &status)
+{
+    if (status != QStringLiteral("active") && status != QStringLiteral("frozen"))
+        return std::nullopt;
+    QSqlQuery up;
+    up.prepare(QStringLiteral("UPDATE station SET status = ? WHERE id = ?"));
+    up.addBindValue(status);
+    up.addBindValue(stationId);
+    if (!up.exec() || up.numRowsAffected() == 0)
+        return std::nullopt;
+    return findStationFullById(stationId);
 }
 
 std::optional<UserRow> setUserStatus(int userId, const QString &status)
@@ -421,6 +486,104 @@ std::optional<StationFull> addStation(const StationFull &s)
         c.exec();
     }
     return findStationFullById(newId);
+}
+
+std::optional<ChargerFull> addCharger(int stationId,const QString &type, double power)
+{
+    QSqlDatabase db = QSqlDatabase::database();
+
+    if (!db.transaction()) {
+        return std::nullopt;
+    }
+
+    // 1. 检查电站是否存在
+    QSqlQuery stationQuery(db);
+    stationQuery.prepare(
+        "SELECT id FROM station WHERE id = ?"
+    );
+    stationQuery.addBindValue(stationId);
+
+    if (!stationQuery.exec() || !stationQuery.next()) {
+        db.rollback();
+        return std::nullopt;
+    }
+
+    // 2. 生成该站内的新电桩编号
+    QSqlQuery codeQuery(db);
+    codeQuery.prepare(R"(
+        SELECT COALESCE(MAX(CAST(substr(code, instr(code, '-') + 1) AS INTEGER)), 0)
+        FROM charger
+        WHERE station_id = ?
+    )");
+    codeQuery.addBindValue(stationId);
+
+    if (!codeQuery.exec() || !codeQuery.next()) {
+        db.rollback();
+        return std::nullopt;
+    }
+
+    int nextNo = codeQuery.value(0).toInt() + 1;
+
+    QString chargerCode =
+        QString("C-%1")
+            .arg(nextNo, 3, 10, QChar('0'));
+
+    // 3. 插入新电桩
+    QSqlQuery insertQuery(db);
+    insertQuery.prepare(R"(
+        INSERT INTO charger
+            (station_id, code, type, power, status)
+        VALUES
+            (?, ?, ?, ?, 'idle')
+    )");
+
+    insertQuery.addBindValue(stationId);
+    insertQuery.addBindValue(chargerCode);
+    insertQuery.addBindValue(type);
+    insertQuery.addBindValue(power);
+
+    if (!insertQuery.exec()) {
+        db.rollback();
+        return std::nullopt;
+    }
+
+    const int chargerId = insertQuery.lastInsertId().toInt();
+
+    // 4. 同步电站的电桩总数
+    QSqlQuery updateQuery(db);
+    updateQuery.prepare(R"(
+        UPDATE station
+        SET total_chargers = (
+            SELECT COUNT(*)
+            FROM charger
+            WHERE station_id = ?
+        )
+        WHERE id = ?
+    )");
+
+    updateQuery.addBindValue(stationId);
+    updateQuery.addBindValue(stationId);
+
+    if (!updateQuery.exec()) {
+        db.rollback();
+        return std::nullopt;
+    }
+
+    if (!db.commit()) {
+        db.rollback();
+        return std::nullopt;
+    }
+
+    // 5. 回读刚刚新增的电桩
+    QSqlQuery query(db);
+    query.prepare(QString(kSelectCharger) + " WHERE c.id = ?");
+    query.addBindValue(chargerId);
+
+    if (!query.exec() || !query.next()) {
+        return std::nullopt;
+    }
+
+    return rowToCharger(query);
 }
 
 }  // namespace dao
