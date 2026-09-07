@@ -1,30 +1,150 @@
 #include "ui/pages/ChargerStatusPage.h"
 
+#include <QCursor>
+#include <QColor>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QHBoxLayout>
 #include <QHeaderView>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QLabel>
+#include <QPainter>
 #include <QTableWidget>
 #include <QVBoxLayout>
 
+#include <QtCharts/QChart>
+#include <QtCharts/QPieSlice>
+
 #include "network/Protocol.h"
 #include "services/ApiClient.h"
+
+namespace {
+const QList<QPair<QString, QString>>& statusMeta() {
+    static const QList<QPair<QString, QString>> meta = {
+        {QStringLiteral("在用"), QStringLiteral("charging")},
+        {QStringLiteral("闲置"), QStringLiteral("idle")},
+        {QStringLiteral("预约"), QStringLiteral("reserved")},
+        {QStringLiteral("故障"), QStringLiteral("fault")},
+        {QStringLiteral("离线"), QStringLiteral("offline")},
+        {QStringLiteral("重启中"), QStringLiteral("rebooting")},
+    };
+    return meta;
+}
+QColor colorOf(int index) {
+    static const QList<QColor> colors = {
+        QColor(0x4f, 0x9e, 0xff), QColor(0x34, 0xc9, 0x8e),
+        QColor(0xb3, 0x88, 0xff), QColor(0xf2, 0x5f, 0x5c),
+        QColor(0x8a, 0x97, 0xa5), QColor(0xff, 0xb0, 0x4d)};
+    return colors.at(index % colors.size());
+}
+}  // namespace
 
 ChargerStatusPage::ChargerStatusPage(ApiClient* api, QWidget* parent)
     : QWidget(parent), m_api(api) {
     auto* title = new QLabel(QStringLiteral("电桩状态分布"));
     title->setObjectName(QStringLiteral("pageTitle"));
 
+    // 自绘气泡
+    m_tip = new QLabel(this, Qt::ToolTip | Qt::FramelessWindowHint);
+    m_tip->setAttribute(Qt::WA_ShowWithoutActivating);
+    m_tip->setAttribute(Qt::WA_TransparentForMouseEvents);
+    m_tip->setStyleSheet(QStringLiteral(
+        "QLabel { color:#e8eef4; background-color:#1e2733;"
+        " border:1px solid #ffffff; padding:5px; }"));
+    m_tip->hide();
+
+    // 右侧：数量/占比表格（双击行 = 看该状态桩明细）
     m_table = new QTableWidget(0, 3);
     m_table->setHorizontalHeaderLabels(
         {QStringLiteral("状态"), QStringLiteral("数量"), QStringLiteral("占比")});
     m_table->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
     m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    m_table->setMaximumWidth(430);
+
+    // 左侧：环形饼图
+    auto* pieChart = new QChart;
+   pieChart->setAnimationOptions(QChart::AllAnimations);
+    pieChart->setTitle(QStringLiteral("电桩状态饼图"));
+
+    pieChart->legend()->setVisible(true);
+    pieChart->legend()->setAlignment(Qt::AlignRight);
+    m_pieSeries = new QPieSeries;
+    m_pieSeries->setHoleSize(0.42);
+    pieChart->addSeries(m_pieSeries);
+    m_pieView = new QChartView(pieChart);
+    m_pieView->setRenderHint(QPainter::Antialiasing);
+
+    auto* midRow = new QHBoxLayout;
+    midRow->addWidget(m_pieView, 1);
+    midRow->addWidget(m_table);
 
     auto* layout = new QVBoxLayout(this);
     layout->addWidget(title);
-    layout->addWidget(m_table);
+    layout->addLayout(midRow, 1);
+
+    // 双击状态行 → 弹窗看该状态的桩（编号/所属电站）
+    connect(m_table, &QTableWidget::cellDoubleClicked, this,
+            [this](int row, int) {
+        if (row < 0 || row >= m_table->rowCount()) {
+            return;
+        }
+        const QString statusKey = m_table->item(row, 0)->data(Qt::UserRole).toString();
+        const QString statusLabel = m_table->item(row, 0)->text();
+        m_api->fetchChargers(0, [this, statusKey, statusLabel]
+                             (int code, const QString&, const QJsonObject& payload) {
+            if (code != proto::code::Ok) {
+                return;
+            }
+            QJsonArray matched;
+            const QJsonArray chargers = payload.value(QStringLiteral("chargers")).toArray();
+            for (const QJsonValue& cv : chargers) {
+                if (cv.toObject().value(QStringLiteral("status")).toString() == statusKey) {
+                    matched.append(cv.toObject());
+                }
+            }
+
+            QDialog dlg(this);
+            dlg.setWindowTitle(QStringLiteral("%1状态的充电桩（%2 台）")
+                                   .arg(statusLabel).arg(matched.size()));
+            auto* tbl = new QTableWidget(matched.size(), 4);
+            tbl->setHorizontalHeaderLabels({QStringLiteral("桩ID"), QStringLiteral("编号"),
+                                            QStringLiteral("所属电站"), QStringLiteral("功率(kW)")});
+            tbl->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+            tbl->setEditTriggers(QAbstractItemView::NoEditTriggers);
+            tbl->setSelectionBehavior(QAbstractItemView::SelectRows);
+            for (int i = 0; i < matched.size(); ++i) {
+                const QJsonObject c = matched.at(i).toObject();
+                tbl->setItem(i, 0, new QTableWidgetItem(
+                    QString::number(c.value(QStringLiteral("id")).toInt())));
+                tbl->setItem(i, 1, new QTableWidgetItem(
+                    c.value(QStringLiteral("code")).toString()));
+                tbl->setItem(i, 2, new QTableWidgetItem(
+                    c.value(QStringLiteral("station_name")).toString()));
+                tbl->setItem(i, 3, new QTableWidgetItem(
+                    QString::number(c.value(QStringLiteral("power")).toDouble())));
+            }
+            auto* btns = new QDialogButtonBox(QDialogButtonBox::Close);
+            connect(btns, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+            Q_UNUSED(btns);
+            auto* lay = new QVBoxLayout(&dlg);
+            lay->addWidget(tbl);
+            lay->addWidget(btns);
+            dlg.resize(560, 380);
+            dlg.exec();
+        });
+    });
 
     refresh();
+}
+
+void ChargerStatusPage::showTipText(const QString& text) {
+    m_tip->setText(text);
+    m_tip->adjustSize();
+    QPoint pos = QCursor::pos() + QPoint(14, 16);
+    m_tip->move(pos);
+    m_tip->show();
+    m_tip->raise();
 }
 
 void ChargerStatusPage::refresh() {
@@ -35,24 +155,56 @@ void ChargerStatusPage::refresh() {
         const QJsonObject dist = payload.value(QStringLiteral("distribution")).toObject();
         const int total = payload.value(QStringLiteral("total")).toInt(0);
 
-        struct Row {
-            QString label;
-            QString key;
-        };
-        const QList<Row> rows = {
-            {QStringLiteral("在用"), QStringLiteral("charging")},
-            {QStringLiteral("闲置"), QStringLiteral("idle")},
-            {QStringLiteral("故障"), QStringLiteral("fault")},
-            {QStringLiteral("离线"), QStringLiteral("offline")},
-        };
-        m_table->setRowCount(rows.size());
-        for (int i = 0; i < rows.size(); ++i) {
-            const int n = dist.value(rows[i].key).toInt(0);
+        const QList<QPair<QString, QString>>& meta = statusMeta();
+
+        // 表格（行数据里存状态 key，供双击使用）
+        m_table->setRowCount(meta.size());
+        for (int i = 0; i < meta.size(); ++i) {
+            const int n = dist.value(meta[i].second).toInt(0);
             const double pct = total > 0 ? (n * 100.0 / total) : 0.0;
-            m_table->setItem(i, 0, new QTableWidgetItem(rows[i].label));
+            auto* keyItem = new QTableWidgetItem(meta[i].first);
+            keyItem->setData(Qt::UserRole, meta[i].second);
+            m_table->setItem(i, 0, keyItem);
             m_table->setItem(i, 1, new QTableWidgetItem(QString::number(n)));
             m_table->setItem(i, 2, new QTableWidgetItem(
                 QString::number(pct, 'f', 1) + QStringLiteral("%")));
+        }
+
+        // 饼图（深色可读文字 + 悬停弹出 + 气泡，与销售页一致）
+        while (!m_pieSeries->isEmpty()) {
+            m_pieSeries->remove(m_pieSeries->slices().first());
+        }
+        int shown = 0;
+        for (int i = 0; i < meta.size(); ++i) {
+            const int n = dist.value(meta[i].second).toInt(0);
+            if (n <= 0) {
+                continue;
+            }
+            ++shown;
+            const QString label = meta[i].first;
+            const double pct = total > 0 ? (n * 100.0 / total) : 0.0;
+            QPieSlice* slice = m_pieSeries->append(label, n);
+            slice->setColor(colorOf(i));
+            slice->setBorderColor(QColor(0xff, 0xff, 0xff));
+            slice->setLabel(QStringLiteral("%1 %2 (%3%)")
+                                .arg(label).arg(n).arg(pct, 0, 'f', 1));
+            slice->setLabelColor(QColor(0x10, 0x16, 0x1d));   // 深色文字，彩色底上清晰
+            slice->setLabelVisible(true);
+            connect(slice, &QPieSlice::hovered, this,
+                    [this, slice, label, n, pct](bool state) {
+                slice->setExploded(state);
+                if (state) {
+                    showTipText(QStringLiteral("%1\n数量：%2\n占比：%3%")
+                                    .arg(label).arg(n).arg(pct, 0, 'f', 1));
+                } else {
+                    m_tip->hide();
+                }
+            });
+        }
+        if (shown == 0) {
+            m_pieSeries->append(QStringLiteral("暂无数据"), 1);
+            m_pieSeries->slices().first()->setColor(QColor(0x2b, 0x39, 0x45));
+            m_pieSeries->slices().first()->setLabelVisible(false);
         }
     });
 }
