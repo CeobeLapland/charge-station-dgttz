@@ -11,6 +11,7 @@
 
 #include "AdminDao.h"
 #include "OrderDao.h"
+#include "ProfileDao.h"
 #include "WorkOrderDao.h"
 #include "ScreenDao.h"
 #include "StationDao.h"
@@ -260,6 +261,25 @@ QJsonObject WsServer::dispatch(QWebSocket *sock, const QString &type, const QJso
     if (type == QStringLiteral("reservation.join"))    return handleReservationJoin(sock, payload, code, message);
     if (type == QStringLiteral("reservation.cancel"))  return handleReservationCancel(sock, payload, code, message);
     if (type == QStringLiteral("reservation.list"))    return handleReservationList(sock, payload, code, message);
+
+    // ---- 个人域 ----
+    if (type == QStringLiteral("favorite.add"))        return handleFavoriteAdd(sock, payload, code, message);
+    if (type == QStringLiteral("favorite.remove"))     return handleFavoriteRemove(sock, payload, code, message);
+    if (type == QStringLiteral("favorite.list"))       return handleFavoriteList(sock, payload, code, message);
+    if (type == QStringLiteral("notification.list"))   return handleNotificationList(sock, payload, code, message);
+    if (type == QStringLiteral("notification.read"))   return handleNotificationRead(sock, payload, code, message);
+    if (type == QStringLiteral("notification.clear"))  return handleNotificationClear(sock, payload, code, message);
+    if (type == QStringLiteral("point.list"))          return handlePointList(sock, payload, code, message);
+    if (type == QStringLiteral("plan.list"))           return handlePlanList(sock, payload, code, message);
+    if (type == QStringLiteral("plan.my"))             return handlePlanMy(sock, payload, code, message);
+    if (type == QStringLiteral("plan.subscribe"))      return handlePlanSubscribe(sock, payload, code, message);
+    if (type == QStringLiteral("coupon.list"))         return handleCouponList(sock, payload, code, message);
+    if (type == QStringLiteral("coupon.claim"))        return handleCouponClaim(sock, payload, code, message);
+    if (type == QStringLiteral("review.list"))         return handleReviewList(sock, payload, code, message);
+    if (type == QStringLiteral("review.create"))       return handleReviewCreate(sock, payload, code, message);
+    if (type == QStringLiteral("review.useful"))       return handleReviewUseful(sock, payload, code, message);
+    if (type == QStringLiteral("weather.get"))         return handleWeatherGet(sock, payload, code, message);
+    if (type == QStringLiteral("faq.list"))            return handleFaqList(sock, payload, code, message);
 
     // ---- 数据大屏(免登录只读) ----
     if (type == QStringLiteral("screen.snapshot"))      return handleScreenSnapshot(sock, payload, code, message);
@@ -1267,4 +1287,291 @@ void WsServer::resumeChargingOrders()
     }
     qInfo().noquote() << QStringLiteral("[恢复] 已把 %1 笔进行中的充电订单交还给仿真线程")
                              .arg(list.size());
+}
+
+// ==================== 个人域: 收藏/通知/积分/会员/券/评价/天气/FAQ ====================
+
+namespace {
+
+QJsonObject favoriteToJson(const FavoriteRow &f)
+{
+    return QJsonObject{
+        {"id", f.id}, {"station_id", f.stationId}, {"station_name", f.stationName},
+        {"address", f.address}, {"area", f.area}, {"create_time", f.createTime},
+        {"longitude", f.longitude}, {"latitude", f.latitude},
+        {"service_fee", f.serviceFee}, {"total_chargers", f.totalChargers},
+        {"free_chargers", f.freeChargers},
+    };
+}
+
+QJsonObject notificationToJson(const NotificationRow &n)
+{
+    return QJsonObject{
+        {"id", n.id}, {"type", n.type}, {"title", n.title}, {"content", n.content},
+        {"related_id", n.relatedId}, {"is_read", n.isRead}, {"create_time", n.createTime},
+    };
+}
+
+QJsonObject planToJson(const MemberPlanRow &p)
+{
+    return QJsonObject{
+        {"id", p.id}, {"name", p.name}, {"price", p.price}, {"valid_days", p.validDays},
+        {"service_fee_discount", p.serviceFeeDiscount}, {"night_discount", p.nightDiscount},
+        {"points_multiplier", p.pointsMultiplier}, {"description", p.description},
+        {"status", p.status},
+    };
+}
+
+QJsonObject userPlanToJson(const UserPlanRow &u)
+{
+    return QJsonObject{
+        {"id", u.id}, {"plan_id", u.planId}, {"plan_name", u.planName},
+        {"start_time", u.startTime}, {"end_time", u.endTime}, {"status", u.status},
+    };
+}
+
+QJsonObject couponToJson(const CouponRow &c)
+{
+    return QJsonObject{
+        {"id", c.id}, {"coupon_id", c.couponId}, {"title", c.title}, {"type", c.type},
+        {"discount_amount", c.discountAmount}, {"min_amount", c.minAmount},
+        {"station_id", c.stationId > 0 ? QJsonValue(c.stationId) : QJsonValue()},
+        {"time_range", c.timeRange}, {"valid_days", c.validDays},
+        {"status", c.status}, {"receive_time", c.receiveTime},
+    };
+}
+
+QJsonObject reviewToJson(const ReviewRow &r)
+{
+    return QJsonObject{
+        {"id", r.id}, {"user_id", r.userId}, {"nickname", r.nickname},
+        {"station_id", r.stationId}, {"station_name", r.stationName},
+        {"order_id", r.orderId}, {"useful_count", r.usefulCount},
+        {"tags", r.tags}, {"content", r.content}, {"create_time", r.createTime},
+        {"overall_score", r.overall}, {"speed_score", r.speed}, {"device_score", r.device},
+        {"parking_score", r.parking}, {"hygiene_score", r.hygiene}, {"service_score", r.service},
+    };
+}
+
+}  // namespace
+
+// ---------- favorite.* ----------
+QJsonObject WsServer::handleFavoriteAdd(QWebSocket *sock, const QJsonObject &payload,
+                                        int &code, QString &message)
+{
+    if (!requireUser(sock, code, message)) return {};
+    const int sid = payload.value(QStringLiteral("station_id")).toInt();
+    if (!dao::addFavorite(userIdOf(sock), sid)) {
+        code = 4001;
+        message = QStringLiteral("电站不存在: id=%1").arg(sid);
+        return {};
+    }
+    message = QStringLiteral("已收藏");
+    return QJsonObject{{"station_id", sid}, {"favorited", true}};
+}
+
+QJsonObject WsServer::handleFavoriteRemove(QWebSocket *sock, const QJsonObject &payload,
+                                           int &code, QString &message)
+{
+    if (!requireUser(sock, code, message)) return {};
+    const int sid = payload.value(QStringLiteral("station_id")).toInt();
+    dao::removeFavorite(userIdOf(sock), sid);
+    message = QStringLiteral("已取消收藏");
+    return QJsonObject{{"station_id", sid}, {"favorited", false}};
+}
+
+QJsonObject WsServer::handleFavoriteList(QWebSocket *sock, const QJsonObject &,
+                                         int &code, QString &message)
+{
+    if (!requireUser(sock, code, message)) return {};
+    QJsonArray arr;
+    for (const auto &f : dao::listFavorites(userIdOf(sock))) arr.append(favoriteToJson(f));
+    return QJsonObject{{"favorites", arr}};
+}
+
+// ---------- notification.* ----------
+QJsonObject WsServer::handleNotificationList(QWebSocket *sock, const QJsonObject &payload,
+                                             int &code, QString &message)
+{
+    if (!requireUser(sock, code, message)) return {};
+    const int limit = payload.value(QStringLiteral("limit")).toInt(50);
+    QJsonArray arr;
+    for (const auto &n : dao::listNotifications(userIdOf(sock), limit))
+        arr.append(notificationToJson(n));
+    return QJsonObject{{"notifications", arr}, {"unread", dao::unreadCount(userIdOf(sock))}};
+}
+
+QJsonObject WsServer::handleNotificationRead(QWebSocket *sock, const QJsonObject &payload,
+                                             int &code, QString &message)
+{
+    if (!requireUser(sock, code, message)) return {};
+    // notification_id 省略或为 0 表示全部标记已读
+    const int nid = payload.value(QStringLiteral("notification_id")).toInt(0);
+    dao::markNotificationRead(userIdOf(sock), nid);
+    message = nid > 0 ? QStringLiteral("已读") : QStringLiteral("全部已读");
+    return QJsonObject{{"unread", dao::unreadCount(userIdOf(sock))}};
+}
+
+QJsonObject WsServer::handleNotificationClear(QWebSocket *sock, const QJsonObject &,
+                                              int &code, QString &message)
+{
+    if (!requireUser(sock, code, message)) return {};
+    const int n = dao::clearNotifications(userIdOf(sock));
+    message = QStringLiteral("已清空 %1 条").arg(n);
+    return QJsonObject{{"cleared", n}, {"unread", 0}};
+}
+
+// ---------- point.list ----------
+QJsonObject WsServer::handlePointList(QWebSocket *sock, const QJsonObject &payload,
+                                      int &code, QString &message)
+{
+    if (!requireUser(sock, code, message)) return {};
+    const int limit = payload.value(QStringLiteral("limit")).toInt(50);
+    QJsonArray arr;
+    for (const auto &p : dao::listPointRecords(userIdOf(sock), limit))
+        arr.append(QJsonObject{{"id", p.id}, {"change", p.change},
+                               {"reason", p.reason}, {"create_time", p.createTime}});
+    return QJsonObject{{"records", arr}, {"total_points", dao::userPoints(userIdOf(sock))}};
+}
+
+// ---------- plan.* ----------
+QJsonObject WsServer::handlePlanList(QWebSocket *, const QJsonObject &, int &, QString &)
+{
+    QJsonArray arr;
+    for (const auto &p : dao::listPlans()) arr.append(planToJson(p));
+    return QJsonObject{{"plans", arr}};
+}
+
+QJsonObject WsServer::handlePlanMy(QWebSocket *sock, const QJsonObject &, int &code, QString &message)
+{
+    if (!requireUser(sock, code, message)) return {};
+    const auto p = dao::currentPlan(userIdOf(sock));
+    return QJsonObject{{"plan", p ? QJsonValue(userPlanToJson(*p)) : QJsonValue()}};
+}
+
+QJsonObject WsServer::handlePlanSubscribe(QWebSocket *sock, const QJsonObject &payload,
+                                          int &code, QString &message)
+{
+    if (!requireUser(sock, code, message)) return {};
+    const int planId = payload.value(QStringLiteral("plan_id")).toInt();
+    double need = 0;
+    const auto p = dao::subscribePlan(userIdOf(sock), planId, &need);
+    if (!p) {
+        if (need > 0) {
+            code = 2002;
+            message = QStringLiteral("余额不足: 需 %1 元").arg(need);
+        } else {
+            code = 4001;
+            message = QStringLiteral("套餐不存在: id=%1").arg(planId);
+        }
+        return {};
+    }
+    dao::pushNotification(userIdOf(sock), QStringLiteral("system"),
+                          QStringLiteral("会员开通成功"),
+                          QStringLiteral("%1 已生效, 有效期至 %2").arg(p->planName, p->endTime), p->id);
+    message = QStringLiteral("开通成功");
+    return QJsonObject{{"plan", userPlanToJson(*p)},
+                       {"balance", dao::userBalance(userIdOf(sock))}};
+}
+
+// ---------- coupon.* ----------
+QJsonObject WsServer::handleCouponList(QWebSocket *sock, const QJsonObject &payload,
+                                       int &code, QString &message)
+{
+    if (!requireUser(sock, code, message)) return {};
+    const QString status = payload.value(QStringLiteral("status")).toString();
+    QJsonArray mine, claimable;
+    for (const auto &c : dao::listMyCoupons(userIdOf(sock), status)) mine.append(couponToJson(c));
+    for (const auto &c : dao::listClaimableCoupons(userIdOf(sock))) claimable.append(couponToJson(c));
+    return QJsonObject{{"coupons", mine}, {"claimable", claimable}};
+}
+
+QJsonObject WsServer::handleCouponClaim(QWebSocket *sock, const QJsonObject &payload,
+                                        int &code, QString &message)
+{
+    if (!requireUser(sock, code, message)) return {};
+    const int cid = payload.value(QStringLiteral("coupon_id")).toInt();
+    const auto c = dao::claimCoupon(userIdOf(sock), cid);
+    if (!c) {
+        code = 4002;
+        message = QStringLiteral("券不存在、已下架或已经领过了");
+        return {};
+    }
+    dao::pushNotification(userIdOf(sock), QStringLiteral("coupon"),
+                          QStringLiteral("领取成功"), c->title, c->id);
+    message = QStringLiteral("领取成功");
+    return QJsonObject{{"coupon", couponToJson(*c)}};
+}
+
+// ---------- review.* ----------
+QJsonObject WsServer::handleReviewList(QWebSocket *sock, const QJsonObject &payload,
+                                       int &code, QString &message)
+{
+    // 带 station_id 时是公开的电站评价, 不需要登录; 不带时看我自己的评价
+    const int sid = payload.value(QStringLiteral("station_id")).toInt(0);
+    if (sid <= 0 && !requireUser(sock, code, message)) return {};
+    const int limit = payload.value(QStringLiteral("limit")).toInt(30);
+    QJsonArray arr;
+    for (const auto &r : dao::listReviews(sid, userIdOf(sock), limit)) arr.append(reviewToJson(r));
+    return QJsonObject{{"reviews", arr}};
+}
+
+QJsonObject WsServer::handleReviewCreate(QWebSocket *sock, const QJsonObject &payload,
+                                         int &code, QString &message)
+{
+    if (!requireUser(sock, code, message)) return {};
+    int errCode = 0;
+    QString errMsg;
+    const auto r = dao::createReview(
+        userIdOf(sock), payload.value(QStringLiteral("order_id")).toInt(),
+        payload.value(QStringLiteral("overall_score")).toDouble(),
+        payload.value(QStringLiteral("speed_score")).toDouble(),
+        payload.value(QStringLiteral("device_score")).toDouble(),
+        payload.value(QStringLiteral("parking_score")).toDouble(),
+        payload.value(QStringLiteral("hygiene_score")).toDouble(),
+        payload.value(QStringLiteral("service_score")).toDouble(),
+        payload.value(QStringLiteral("tags")).toString(),
+        payload.value(QStringLiteral("content")).toString(), &errCode, &errMsg);
+    if (!r) { code = errCode ? errCode : 4002; message = errMsg; return {}; }
+
+    broadcast(QStringLiteral("push.review"), QJsonObject{{"review", reviewToJson(*r)}});
+    message = QStringLiteral("感谢您的评价");
+    return QJsonObject{{"review", reviewToJson(*r)}};
+}
+
+QJsonObject WsServer::handleReviewUseful(QWebSocket *sock, const QJsonObject &payload,
+                                         int &code, QString &message)
+{
+    if (!requireUser(sock, code, message)) return {};
+    const int rid = payload.value(QStringLiteral("review_id")).toInt();
+    if (!dao::markReviewUseful(rid)) {
+        code = 4001;
+        message = QStringLiteral("评价不存在: id=%1").arg(rid);
+        return {};
+    }
+    return QJsonObject{{"review_id", rid}};
+}
+
+// ---------- weather.get / faq.list (免登录) ----------
+QJsonObject WsServer::handleWeatherGet(QWebSocket *, const QJsonObject &payload,
+                                       int &code, QString &message)
+{
+    const auto w = dao::weatherOf(payload.value(QStringLiteral("area")).toString());
+    if (!w) {
+        code = 4001;
+        message = QStringLiteral("暂无该区域天气数据");
+        return {};
+    }
+    return QJsonObject{{"weather", QJsonObject{
+        {"area", w->area}, {"condition", w->condition}, {"temperature", w->temperature},
+        {"forecast", w->forecast}, {"update_time", w->updateTime}}}};
+}
+
+QJsonObject WsServer::handleFaqList(QWebSocket *, const QJsonObject &payload, int &, QString &)
+{
+    QJsonArray arr;
+    for (const auto &f : dao::listFaq(payload.value(QStringLiteral("category")).toString()))
+        arr.append(QJsonObject{{"id", f.id}, {"category", f.category},
+                               {"question", f.question}, {"answer", f.answer}, {"sort", f.sort}});
+    return QJsonObject{{"faqs", arr}};
 }

@@ -124,6 +124,25 @@ private:
     QJsonObject handleReservationCancel(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
     QJsonObject handleReservationList(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
 
+    // ---- 个人域: 收藏/通知/积分/会员/优惠券/评价/天气/FAQ ----
+    QJsonObject handleFavoriteAdd(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+    QJsonObject handleFavoriteRemove(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+    QJsonObject handleFavoriteList(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+    QJsonObject handleNotificationList(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+    QJsonObject handleNotificationRead(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+    QJsonObject handleNotificationClear(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+    QJsonObject handlePointList(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+    QJsonObject handlePlanList(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+    QJsonObject handlePlanMy(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+    QJsonObject handlePlanSubscribe(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+    QJsonObject handleCouponList(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+    QJsonObject handleCouponClaim(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+    QJsonObject handleReviewList(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+    QJsonObject handleReviewCreate(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+    QJsonObject handleReviewUseful(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+    QJsonObject handleWeatherGet(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+    QJsonObject handleFaqList(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+
     // 一根桩空出来时叫号: 匹配该站队首并推送 push.reservation_notify
     void notifyQueueOnChargerFree(int stationId);
 

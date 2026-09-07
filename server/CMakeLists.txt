@@ -27,6 +27,8 @@ qt_add_executable(charge_server
     src/OrderDao.cpp
     src/WorkOrderDao.h
     src/WorkOrderDao.cpp
+    src/ProfileDao.h
+    src/ProfileDao.cpp
     src/ChargeSimulator.h
     src/ChargeSimulator.cpp
     src/WsServer.h
