@@ -27,6 +27,8 @@ public:
     void fetchUsers(const QString& keyword, ResponseCb cb);
     void addStation(const QJsonObject& station, ResponseCb cb);
     void restartCharger(int chargerId, ResponseCb cb);
+    void pauseCharger(int chargerId, ResponseCb cb);
+    void addCharger(const QJsonObject& charger, ResponseCb cb);
     void toggleUserStatus(int userId, const QString& status, ResponseCb cb);
     void fetchDeviceLogs(int chargerId, ResponseCb cb);
 

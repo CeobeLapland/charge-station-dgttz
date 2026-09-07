@@ -84,6 +84,18 @@ void ApiClient::restartCharger(int chargerId, ResponseCb cb) {
              MockDataProvider::chargerRestart(chargerId), cb);
 }
 
+void ApiClient::pauseCharger(int chargerId, ResponseCb cb) {
+    QJsonObject payload;
+    payload.insert(QStringLiteral("charger_id"), chargerId);
+    dispatch(proto::type::kAdminChargerPause, payload,
+             MockDataProvider::chargerPause(chargerId), cb);
+}
+
+void ApiClient::addCharger(const QJsonObject& charger, ResponseCb cb) {
+    // 消息类型：admin.charger_add（组内 spec 待补，server 暂未实现；Mock 下可用）
+    static const QString kAdminChargerAdd = QStringLiteral("admin.charger_add");
+    dispatch(kAdminChargerAdd, charger, MockDataProvider::addCharger(charger), cb);
+}
 void ApiClient::toggleUserStatus(int userId, const QString& status, ResponseCb cb) {
     QJsonObject payload;
     payload.insert(QStringLiteral("user_id"), userId);
