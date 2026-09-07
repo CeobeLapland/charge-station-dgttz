@@ -431,12 +431,25 @@ Item {
         Row {
             anchors.centerIn: parent
             spacing: 16
-            // 导航
+            // 导航（高德 web 路线规划）
             Rectangle {
                 width: 140; height: 48; radius: Theme.radiusSmall
                 color: Theme.background; border.color: Theme.primary; border.width: 1
                 Text { anchors.centerIn: parent; text: qsTr("一键导航"); color: Theme.primary; font.bold: true; font.pixelSize: Theme.fontSizeBase }
-                MouseArea { anchors.fill: parent; onClicked: showToast(qsTr("导航（示例）：腾讯地图路线规划待接入")) }
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: {
+                        if (!root.st || !root.st.longitude || !root.st.latitude) {
+                            showToast(qsTr("该电站暂无坐标，无法导航"))
+                            return
+                        }
+                        root.stackView.push("qrc:/UserClient/qml/pages/NavRoutePage.qml", {
+                            fromLng: 116.397128, fromLat: 39.916527,   // 模拟定位（北京·朝阳）
+                            toLng: Number(root.st.longitude), toLat: Number(root.st.latitude),
+                            toName: root.st.name || qsTr("目的地")
+                        })
+                    }
+                }
             }
             // 立即预约（充电全流程统一入口）
             Rectangle {
