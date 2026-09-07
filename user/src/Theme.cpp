@@ -2,7 +2,8 @@
 
 namespace {
 
-// 风格注册表：techBlue(现代科技蓝，默认) / minimalDark(深色极简) / springGreen(清新绿)
+// 风格注册表：techBlue(现代科技蓝，默认) / minimalDark(深色极简) / springGreen(清新绿) /
+// royalPurple(皇家紫金) / sunsetOrange(日落暖橙) / oceanTeal(海洋青碧) / midnightBlue(星空深蓝)
 const QVariantMap &kStyles() {
     static const QVariantMap s = {
         { QStringLiteral("techBlue"), QVariantMap {
@@ -51,6 +52,70 @@ const QVariantMap &kStyles() {
             { QStringLiteral("warn"), QColor("#f59e0b") },
             { QStringLiteral("danger"), QColor("#ef4444") },
             { QStringLiteral("radius"), 12 },
+            { QStringLiteral("radiusSmall"), 8 }
+        }},
+        { QStringLiteral("royalPurple"), QVariantMap {
+            { QStringLiteral("primary"), QColor("#7c3aed") },
+            { QStringLiteral("primaryLight"), QColor("#a78bfa") },
+            { QStringLiteral("primaryDark"), QColor("#5b21b6") },
+            { QStringLiteral("accent"), QColor("#f0abfc") },
+            { QStringLiteral("background"), QColor("#faf7ff") },
+            { QStringLiteral("card"), QColor("#ffffff") },
+            { QStringLiteral("border"), QColor("#ede5fb") },
+            { QStringLiteral("textPrimary"), QColor("#1e1b33") },
+            { QStringLiteral("textSecondary"), QColor("#6d6789") },
+            { QStringLiteral("success"), QColor("#10b981") },
+            { QStringLiteral("warn"), QColor("#f59e0b") },
+            { QStringLiteral("danger"), QColor("#ef4444") },
+            { QStringLiteral("radius"), 16 },
+            { QStringLiteral("radiusSmall"), 10 }
+        }},
+        { QStringLiteral("sunsetOrange"), QVariantMap {
+            { QStringLiteral("primary"), QColor("#fb8b24") },
+            { QStringLiteral("primaryLight"), QColor("#ffab52") },
+            { QStringLiteral("primaryDark"), QColor("#d96a0a") },
+            { QStringLiteral("accent"), QColor("#ff5e5b") },
+            { QStringLiteral("background"), QColor("#fff9f2") },
+            { QStringLiteral("card"), QColor("#ffffff") },
+            { QStringLiteral("border"), QColor("#ffe8cf") },
+            { QStringLiteral("textPrimary"), QColor("#2b2118") },
+            { QStringLiteral("textSecondary"), QColor("#8a7760") },
+            { QStringLiteral("success"), QColor("#16a34a") },
+            { QStringLiteral("warn"), QColor("#f59e0b") },
+            { QStringLiteral("danger"), QColor("#ef4444") },
+            { QStringLiteral("radius"), 14 },
+            { QStringLiteral("radiusSmall"), 8 }
+        }},
+        { QStringLiteral("oceanTeal"), QVariantMap {
+            { QStringLiteral("primary"), QColor("#0d9488") },
+            { QStringLiteral("primaryLight"), QColor("#2dd4bf") },
+            { QStringLiteral("primaryDark"), QColor("#0f766e") },
+            { QStringLiteral("accent"), QColor("#7dd3fc") },
+            { QStringLiteral("background"), QColor("#f2fbf9") },
+            { QStringLiteral("card"), QColor("#ffffff") },
+            { QStringLiteral("border"), QColor("#d9f3ee") },
+            { QStringLiteral("textPrimary"), QColor("#10312c") },
+            { QStringLiteral("textSecondary"), QColor("#5e7f78") },
+            { QStringLiteral("success"), QColor("#10b981") },
+            { QStringLiteral("warn"), QColor("#f59e0b") },
+            { QStringLiteral("danger"), QColor("#ef4444") },
+            { QStringLiteral("radius"), 14 },
+            { QStringLiteral("radiusSmall"), 8 }
+        }},
+        { QStringLiteral("midnightBlue"), QVariantMap {
+            { QStringLiteral("primary"), QColor("#6366f1") },
+            { QStringLiteral("primaryLight"), QColor("#818cf8") },
+            { QStringLiteral("primaryDark"), QColor("#4338ca") },
+            { QStringLiteral("accent"), QColor("#22d3ee") },
+            { QStringLiteral("background"), QColor("#0f1424") },
+            { QStringLiteral("card"), QColor("#1a2138") },
+            { QStringLiteral("border"), QColor("#2a3352") },
+            { QStringLiteral("textPrimary"), QColor("#e8edff") },
+            { QStringLiteral("textSecondary"), QColor("#8f9bc4") },
+            { QStringLiteral("success"), QColor("#34d399") },
+            { QStringLiteral("warn"), QColor("#fbbf24") },
+            { QStringLiteral("danger"), QColor("#f87171") },
+            { QStringLiteral("radius"), 14 },
             { QStringLiteral("radiusSmall"), 8 }
         }}
     };

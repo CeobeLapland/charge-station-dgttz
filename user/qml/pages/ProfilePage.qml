@@ -191,7 +191,7 @@ Item {
             // ========== ② 会员中心入口 ==========
             Rectangle {
                 width: parent.width - 32; x: 16
-                height: memberRow.implicitHeight + 60
+                height: memberRow.implicitHeight + 80
                 radius: Theme.radiusSmall
                 gradient: Gradient {
                     GradientStop { position: 0.0; color: "#FFF8E1" }
@@ -546,6 +546,36 @@ Item {
                 }
             }
 
+            // ========== ⑧ 帮助与关于：用户协议&软件介绍 / 常见问题 ==========
+            Rectangle {
+                width: parent.width - 32; x: 16
+                height: aboutCol.implicitHeight + 22
+                color: Theme.card
+                radius: Theme.radiusSmall
+                border.color: Theme.border
+                Column {
+                    id: aboutCol
+                    width: parent.width - 32; x: 16; y: 14
+                    spacing: 4
+
+                    // 用户协议与软件介绍
+                    LinkRow {
+                        icon: "\u{1F4C4}"
+                        title: qsTr("用户协议与软件介绍")
+                        sub: qsTr("了解服务条款与产品介绍")
+                        onClicked: root.stackView.push("qrc:/UserClient/qml/pages/AgreementPage.qml")
+                    }
+                    Rectangle { width: parent.width; height: 1; color: Theme.border }
+                    // 常见问题与解答
+                    LinkRow {
+                        icon: "\u{2753}"
+                        title: qsTr("常见问题与解答")
+                        sub: qsTr("使用问题速查，答不上来问客服")
+                        onClicked: root.stackView.push("qrc:/UserClient/qml/pages/FaqPage.qml")
+                    }
+                }
+            }
+
             // 底部说明（占位）
             Text {
                 width: parent.width - 32; x: 16
@@ -789,6 +819,49 @@ Item {
             }
         }
         MouseArea { anchors.fill: parent; anchors.margins: -6; onClicked: se.clicked() }
+    }
+
+    // 帮助与关于整行入口（icon + 标题/副题 + 箭头）
+    component LinkRow: Rectangle {
+        id: lr
+        property string icon
+        property string title
+        property string sub
+        signal clicked()
+        width: parent.width
+        height: 60
+        color: "transparent"
+        Text {
+            id: lrIcon
+            anchors.left: parent.left
+            anchors.verticalCenter: parent.verticalCenter
+            text: lr.icon; font.pixelSize: 24
+        }
+        Text {
+            id: lrArrow
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            text: "›"; color: Theme.textSecondary; font.pixelSize: 26
+        }
+        Column {
+            anchors.left: lrIcon.right; anchors.leftMargin: 12
+            anchors.right: lrArrow.left; anchors.rightMargin: 12
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: 2
+            Text {
+                width: parent.width
+                text: lr.title
+                color: Theme.textPrimary; font.pixelSize: Theme.fontSizeSmall; font.bold: true
+                elide: Text.ElideRight
+            }
+            Text {
+                width: parent.width
+                text: lr.sub
+                color: Theme.textSecondary; font.pixelSize: Theme.fontSizeTiny
+                elide: Text.ElideRight
+            }
+        }
+        MouseArea { anchors.fill: parent; onReleased: lr.clicked() }
     }
 
     // 车辆卡（VehicleCard：真正车辆 / "+" 添加卡）
