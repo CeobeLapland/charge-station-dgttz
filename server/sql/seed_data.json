@@ -1,0 +1,454 @@
+{
+  "_说明": "充电站系统初始静态种子数据。由 make_seed.py 读取并写入 charge.db。",
+  "_约定": "1) 顶层以 _ 开头的键仅为说明, 加载时忽略; 2) 各表数据行内的 _注释 字段同样被忽略; 3) 列表顺序即插入顺序, sqlite 自增 id 从 1 递增, 请勿随意调序, 否则会破坏后续动态造数逻辑; 4) 外键用「引用字段」表达(如 merchant_ref=商户名, user_ref=用户手机号), 由脚本解析成真实 id, 扩充数据时不易错位; 5) 动态造数(充电桩/订单/测量/告警等)会按 JSON 的站点与用户数量自动扩展: 每多一座站会自动生成桩与测量数据, 每多一个用户会自动生成订单与余额回流。",
+
+  "admin": [
+    { "_注释": "管理员账号。account, password", "account": "admin", "password": "123456" }
+  ],
+
+  "merchant": [
+    {
+      "_注释": "合作商户。create_days_ago=创建于多少天前。name 会被 station.merchant_ref 引用",
+      "name": "绿能合作运营有限公司",
+      "contact_name": "李经理",
+      "contact_phone": "13900001234",
+      "cooperation_type": "partner",
+      "status": "active",
+      "remark": "大学城站合作方",
+      "create_days_ago": 90
+    },
+    {
+      "name": "城东快充服务公司",
+      "contact_name": "王经理",
+      "contact_phone": "13900002222",
+      "cooperation_type": "partner",
+      "status": "active",
+      "remark": "城东区新站合作方",
+      "create_days_ago": 45
+    },
+    {
+      "name": "青秀园区运营中心",
+      "contact_name": "陈主管",
+      "contact_phone": "13900003333",
+      "cooperation_type": "partner",
+      "status": "paused",
+      "remark": "物流园区站合作方, 筹备中",
+      "create_days_ago": 20
+    },
+    {
+      "name": "华北新能源服务集团",
+      "contact_name": "赵总",
+      "contact_phone": "13900004444",
+      "cooperation_type": "franchise",
+      "status": "active",
+      "remark": "加盟华东连锁站",
+      "create_days_ago": 120
+    },
+    {
+      "name": "华南智能充电科技",
+      "contact_name": "孙经理",
+      "contact_phone": "13900005555",
+      "cooperation_type": "third_party",
+      "status": "active",
+      "remark": "第三方系统对接",
+      "create_days_ago": 60
+    },
+    {
+      "name": "华东商业广场物业",
+      "contact_name": "钱主管",
+      "contact_phone": "13900006666",
+      "cooperation_type": "partner",
+      "status": "active",
+      "remark": "商超停车场合作",
+      "create_days_ago": 35
+    }
+  ],
+
+  "station": [
+    {
+      "_注释": "充电站。merchant_ref=合作商户名(null 表示自营), merchant_ref 将被解析为 merchant_id; charger_count=该站充电桩数量(默认10)",
+      "name": "市中心快充站",
+      "address": "解放路100号",
+      "area": "商业区",
+      "longitude": 123.4310, "latitude": 41.8057,
+      "service_fee": 0.80, "parking_fee": 5,
+      "business_hours": "00:00-24:00",
+      "facilities": ["convenience_store", "wifi", "rain_shelter"],
+      "owner_type": "self_run", "merchant_ref": null, "has_swap": 0, "charger_count": 12
+    },
+    {
+      "name": "高新软件园站", "address": "创新路2号", "area": "高新区",
+      "longitude": 123.4587, "latitude": 41.7423,
+      "service_fee": 0.60, "parking_fee": 0, "business_hours": "00:00-24:00",
+      "facilities": ["washroom", "rest_area", "underground_parking"],
+      "owner_type": "self_run", "merchant_ref": null, "has_swap": 0, "charger_count": 10
+    },
+    {
+      "name": "大学城充电站", "address": "文华街33号", "area": "大学城",
+      "longitude": 123.4123, "latitude": 41.7669,
+      "service_fee": 0.50, "parking_fee": 0, "business_hours": "06:00-23:00",
+      "facilities": ["washroom", "convenience_store"],
+      "owner_type": "partner", "merchant_ref": "绿能合作运营有限公司", "has_swap": 0, "charger_count": 10
+    },
+    {
+      "name": "老城区慢充站", "address": "中山巷8号", "area": "老城区",
+      "longitude": 123.3958, "latitude": 41.8121,
+      "service_fee": 0.40, "parking_fee": 2, "business_hours": "00:00-24:00",
+      "facilities": [],
+      "owner_type": "self_run", "merchant_ref": null, "has_swap": 0, "charger_count": 8
+    },
+    {
+      "name": "滨河换电综合站", "address": "滨河大道66号", "area": "滨河区",
+      "longitude": 123.4776, "latitude": 41.7890,
+      "service_fee": 0.70, "parking_fee": 0, "business_hours": "00:00-24:00",
+      "facilities": ["rest_area", "wifi", "rain_shelter", "underground_parking"],
+      "owner_type": "self_run", "merchant_ref": null, "has_swap": 1, "charger_count": 10
+    },
+    {
+      "name": "城东新区站", "address": "科技大道一号", "area": "城东区",
+      "longitude": 123.5210, "latitude": 41.7400,
+      "service_fee": 0.65, "parking_fee": 0, "business_hours": "00:00-24:00",
+      "facilities": ["washroom", "convenience_store", "wifi"],
+      "owner_type": "partner", "merchant_ref": "城东快充服务公司", "has_swap": 0, "charger_count": 8
+    },
+    {
+      "name": "高铁枢纽北站", "address": "北站广场东路12号", "area": "新城区",
+      "longitude": 123.5650, "latitude": 41.8150,
+      "service_fee": 0.75, "parking_fee": 4, "business_hours": "05:00-24:00",
+      "facilities": ["rest_area", "convenience_store", "rain_shelter", "underground_parking"],
+      "owner_type": "self_run", "merchant_ref": null, "has_swap": 0, "charger_count": 14
+    },
+    {
+      "name": "智慧物流园区站", "address": "物流大道88号", "area": "物流园",
+      "longitude": 123.3900, "latitude": 41.7700,
+      "service_fee": 0.55, "parking_fee": 0, "business_hours": "00:00-24:00",
+      "facilities": ["washroom", "rest_area"],
+      "owner_type": "partner", "merchant_ref": "青秀园区运营中心", "has_swap": 0, "charger_count": 6
+    },
+    {
+      "name": "会展中心站", "address": "会展大道2号", "area": "新城区",
+      "longitude": 123.5400, "latitude": 41.7800,
+      "service_fee": 0.72, "parking_fee": 6, "business_hours": "00:00-24:00",
+      "facilities": ["wifi", "service_center", "rain_shelter"],
+      "owner_type": "self_run", "merchant_ref": null, "has_swap": 0, "charger_count": 10
+    },
+    {
+      "name": "临港工业园站", "address": "临港大道55号", "area": "临港区",
+      "longitude": 123.6000, "latitude": 41.7000,
+      "service_fee": 0.60, "parking_fee": 0, "business_hours": "07:00-22:00",
+      "facilities": ["washroom", "rest_area", "convenience_store"],
+      "owner_type": "self_run", "merchant_ref": null, "has_swap": 0, "charger_count": 8
+    },
+    {
+      "name": "生态田园度假站", "address": "郊野公园南门", "area": "郊野",
+      "longitude": 123.3500, "latitude": 41.8800,
+      "service_fee": 0.50, "parking_fee": 0, "business_hours": "08:00-20:00",
+      "facilities": ["altitude_nearby", "rest_area"],
+      "owner_type": "self_run", "merchant_ref": null, "has_swap": 0, "charger_count": 6
+    },
+    {
+      "name": "双子塔超充站", "address": "商务中环118号", "area": "商务区",
+      "longitude": 123.4100, "latitude": 41.8150,
+      "service_fee": 0.90, "parking_fee": 8, "business_hours": "00:00-24:00",
+      "facilities": ["coffee_shop", "wifi", "rest_area", "underground_parking"],
+      "owner_type": "self_run", "merchant_ref": null, "has_swap": 0, "charger_count": 16
+    },
+
+    {
+      "_注释": "以下为其他城市站。area 用「城市·区域」命名(如 上海·徐汇), 该站所在城市主要用于跨城列表展示",
+      "name": "徐汇滨江超充站", "address": "徐汇区滨江大道88号", "area": "上海·徐汇",
+      "longitude": 121.4630, "latitude": 31.1910,
+      "service_fee": 0.85, "parking_fee": 6, "business_hours": "00:00-24:00",
+      "facilities": ["wifi", "rest_area", "rain_shelter", "underground_parking"],
+      "owner_type": "self_run", "merchant_ref": null, "has_swap": 0, "charger_count": 14
+    },
+    {
+      "name": "南山科技园站", "address": "南山区科技园南区", "area": "深圳·南山",
+      "longitude": 113.9410, "latitude": 22.5470,
+      "service_fee": 0.80, "parking_fee": 5, "business_hours": "00:00-24:00",
+      "facilities": ["washroom", "convenience_store", "wifi"],
+      "owner_type": "partner", "merchant_ref": "城东快充服务公司", "has_swap": 0, "charger_count": 10
+    },
+    {
+      "name": "天河区商圈站", "address": "天河区天河路商圈", "area": "广州·天河",
+      "longitude": 113.3230, "latitude": 23.1280,
+      "service_fee": 0.78, "parking_fee": 7, "business_hours": "00:00-24:00",
+      "facilities": ["coffee_shop", "rest_area", "underground_parking"],
+      "owner_type": "self_run", "merchant_ref": null, "has_swap": 0, "charger_count": 8
+    },
+    {
+      "name": "西湖文创园站", "address": "西湖区文一西路", "area": "杭州·西湖",
+      "longitude": 120.1520, "latitude": 30.2450,
+      "service_fee": 0.70, "parking_fee": 0, "business_hours": "09:00-22:00",
+      "facilities": ["washroom", "wifi", "rest_area"],
+      "owner_type": "self_run", "merchant_ref": null, "has_swap": 0, "charger_count": 6
+    },
+    {
+      "name": "天府软件园站", "address": "天府大道南段", "area": "成都·天府新区",
+      "longitude": 104.0770, "latitude": 30.5050,
+      "service_fee": 0.75, "parking_fee": 3, "business_hours": "00:00-24:00",
+      "facilities": ["washroom", "rest_area", "convenience_store"],
+      "owner_type": "partner", "merchant_ref": "绿能合作运营有限公司", "has_swap": 0, "charger_count": 10
+    },
+    {
+      "name": "光谷软件园站", "address": "洪山区光谷大道", "area": "武汉·光谷",
+      "longitude": 114.4140, "latitude": 30.4890,
+      "service_fee": 0.72, "parking_fee": 0, "business_hours": "00:00-24:00",
+      "facilities": ["rest_area", "wifi"],
+      "owner_type": "self_run", "merchant_ref": null, "has_swap": 0, "charger_count": 8
+    },
+    {
+      "name": "江北新区站", "address": "江北新区浦滨路", "area": "南京·江北",
+      "longitude": 118.7070, "latitude": 32.1560,
+      "service_fee": 0.68, "parking_fee": 0, "business_hours": "00:00-24:00",
+      "facilities": ["convenience_store", "rain_shelter"],
+      "owner_type": "self_run", "merchant_ref": null, "has_swap": 0, "charger_count": 6
+    },
+    {
+      "name": "高新保税区站", "address": "高新区锦业路", "area": "西安·高新",
+      "longitude": 108.9050, "latitude": 34.2280,
+      "service_fee": 0.66, "parking_fee": 0, "business_hours": "07:00-22:00",
+      "facilities": ["washroom", "rest_area"],
+      "owner_type": "self_run", "merchant_ref": null, "has_swap": 0, "charger_count": 6
+    },
+    {
+      "name": "陆家嘴金融城站", "address": "浦东新区陆家嘴环路", "area": "上海·浦东",
+      "longitude": 121.5050, "latitude": 31.2400,
+      "service_fee": 0.95, "parking_fee": 10, "business_hours": "00:00-24:00",
+      "facilities": ["coffee_shop", "wifi", "underground_parking"],
+      "owner_type": "self_run", "merchant_ref": null, "has_swap": 0, "charger_count": 16
+    },
+    {
+      "name": "朝阳CBD超充站", "address": "朝阳区建国门外大街", "area": "北京·朝阳",
+      "longitude": 116.4610, "latitude": 39.9080,
+      "service_fee": 0.90, "parking_fee": 9, "business_hours": "00:00-24:00",
+      "facilities": ["wifi", "coffee_shop", "underground_parking"],
+      "owner_type": "partner", "merchant_ref": "华北新能源服务集团", "has_swap": 0, "charger_count": 18
+    },
+    {
+      "name": "十里河物流园站", "address": "朝阳区十里河桥", "area": "北京·朝阳",
+      "longitude": 116.4580, "latitude": 39.8620,
+      "service_fee": 0.60, "parking_fee": 0, "business_hours": "00:00-24:00",
+      "facilities": ["washroom", "rest_area"],
+      "owner_type": "third_party", "merchant_ref": "华南智能充电科技", "has_swap": 1, "charger_count": 8
+    },
+    {
+      "name": "海淀中关村站", "address": "海淀区中关村大街", "area": "北京·海淀",
+      "longitude": 116.3130, "latitude": 39.9750,
+      "service_fee": 0.82, "parking_fee": 6, "business_hours": "00:00-23:59",
+      "facilities": ["rest_area", "wifi", "convenience_store"],
+      "owner_type": "self_run", "merchant_ref": null, "has_swap": 0, "charger_count": 12
+    },
+    {
+      "name": "苏州工业园区站", "address": "工业园区金鸡湖大道", "area": "江苏苏州·园区",
+      "longitude": 120.6740, "latitude": 31.3150,
+      "service_fee": 0.72, "parking_fee": 0, "business_hours": "00:00-24:00",
+      "facilities": ["washroom", "rest_area", "convenience_store"],
+      "owner_type": "partner", "merchant_ref": "华北新能源服务集团", "has_swap": 0, "charger_count": 10
+    },
+    {
+      "name": "天津滨海新区站", "address": "滨海新区核心区", "area": "天津·滨海",
+      "longitude": 117.6540, "latitude": 39.0620,
+      "service_fee": 0.70, "parking_fee": 2, "business_hours": "00:00-24:00",
+      "facilities": ["convenience_store", "rain_shelter"],
+      "owner_type": "self_run", "merchant_ref": null, "has_swap": 0, "charger_count": 6
+    },
+    {
+      "name": "重庆两江新区站", "address": "两江新区金开大道", "area": "重庆·两江",
+      "longitude": 106.5370, "latitude": 29.6820,
+      "service_fee": 0.68, "parking_fee": 0, "business_hours": "00:00-24:00",
+      "facilities": ["rest_area", "wifi"],
+      "owner_type": "partner", "merchant_ref": "华东商业广场物业", "has_swap": 0, "charger_count": 8
+    },
+    {
+      "name": "郑州东站站", "address": "金水区郑东新区", "area": "河南郑州·金水",
+      "longitude": 113.7530, "latitude": 34.7670,
+      "service_fee": 0.65, "parking_fee": 4, "business_hours": "05:00-24:00",
+      "facilities": ["washroom", "convenience_store"],
+      "owner_type": "third_party", "merchant_ref": "华南智能充电科技", "has_swap": 0, "charger_count": 10
+    },
+    {
+      "name": "合肥政务区站", "address": "蜀山区潜山路", "area": "安徽合肥·蜀山",
+      "longitude": 117.2270, "latitude": 31.8210,
+      "service_fee": 0.62, "parking_fee": 0, "business_hours": "00:00-24:00",
+      "facilities": ["rest_area", "rain_shelter"],
+      "owner_type": "self_run", "merchant_ref": null, "has_swap": 0, "charger_count": 6
+    },
+    {
+      "name": "长沙梅溪湖站", "address": "岳麓区梅溪湖路", "area": "湖南长沙·岳麓",
+      "longitude": 112.8910, "latitude": 28.1970,
+      "service_fee": 0.66, "parking_fee": 3, "business_hours": "00:00-24:00",
+      "facilities": ["wifi", "rest_area"],
+      "owner_type": "partner", "merchant_ref": "华东商业广场物业", "has_swap": 0, "charger_count": 8
+    }
+  ],
+
+  "price_rule": [
+    {
+      "_注释": "分时电价。station_ref=适用站点(null=全站通用三档)。level 取值 valley/flat/peak",
+      "level": "valley", "price": 0.40, "time_range": "00:00-08:00", "station_ref": null
+    },
+    { "level": "flat",  "price": 0.70, "time_range": "08:00-17:00", "station_ref": null },
+    { "level": "peak",  "price": 1.00, "time_range": "17:00-21:00", "station_ref": null },
+    { "level": "flat",  "price": 0.70, "time_range": "21:00-24:00", "station_ref": null },
+    { "_注释": "专属站规则: 大学城谷价更低", "level": "valley", "price": 0.35, "time_range": "00:00-08:00", "station_ref": "大学城充电站" },
+    { "_注释": "专属站规则: 市中心峰价更高", "level": "peak",   "price": 1.20, "time_range": "17:00-21:00", "station_ref": "市中心快充站" },
+    { "_注释": "专属站规则: 老城区整体更便宜", "level": "flat", "price": 0.55, "time_range": "08:00-17:00", "station_ref": "老城区慢充站" },
+    { "_注释": "专属站规则: 双子塔峰价更高", "level": "peak",   "price": 1.30, "time_range": "17:00-21:00", "station_ref": "双子塔超充站" }
+  ],
+
+  "user": [
+    {
+      "_注释": "测试用户。phone 会被 vehicle.user_ref 引用。level: vip 用户会收到额外权益演示",
+      "phone": "13800000001", "nickname": "用户0001", "level": "normal"
+    },
+    { "phone": "13800000002", "nickname": "早高峰通勤者", "level": "normal" },
+    { "phone": "13800000003", "nickname": "用户0003", "level": "vip" },
+    { "phone": "13800000004", "nickname": "夜猫子网约车", "level": "normal" },
+    { "phone": "13800000005", "nickname": "用户0005", "level": "normal" },
+    { "phone": "13800001006", "nickname": "物流老周", "level": "normal" },
+    { "phone": "13800001007", "nickname": "周末自驾客", "level": "normal" },
+    { "phone": "13800001008", "nickname": "园区上班族", "level": "normal" },
+    { "phone": "13800001009", "nickname": "滴滴快车小李", "level": "vip" },
+    { "phone": "13800001010", "nickname": "搬家师傅", "level": "normal" },
+    { "phone": "13800001011", "nickname": "外卖骑手", "level": "normal" },
+    { "phone": "13800001012", "nickname": "深度长跑用户", "level": "vip" },
+    { "phone": "13800002001", "nickname": "北京白领小陈", "level": "normal" },
+    { "phone": "13800002002", "nickname": "苏州通勤客", "level": "normal" },
+    { "phone": "13800002003", "nickname": "网约车司机阿强", "level": "vip" },
+    { "phone": "13800002004", "nickname": "货运平台司机", "level": "normal" },
+    { "phone": "13800002005", "nickname": "周末郊游族", "level": "normal" }
+  ],
+
+  "vehicle": [
+    {
+      "_注释": "车辆。user_ref=所属用户手机号, 将被解析成 user_id。connector_type: dc_gb=直流快充 / ac_gb=交流慢充",
+      "user_ref": "13800000001", "name": "我的比亚迪", "type": "car",
+      "battery_kwh": 60, "connector_type": "dc_gb", "max_power_kw": 120, "is_default": 1
+    },
+    { "user_ref": "13800000001", "name": "买菜小车", "type": "car", "battery_kwh": 30, "connector_type": "ac_gb", "max_power_kw": 7, "is_default": 0 },
+    { "user_ref": "13800000002", "name": "通勤电车", "type": "car", "battery_kwh": 75, "connector_type": "dc_gb", "max_power_kw": 150, "is_default": 1 },
+    { "user_ref": "13800000003", "name": "公司货车", "type": "light_truck", "battery_kwh": 100, "connector_type": "dc_gb", "max_power_kw": 120, "is_default": 1 },
+    { "user_ref": "13800000004", "name": "网约车", "type": "car", "battery_kwh": 60, "connector_type": "dc_gb", "max_power_kw": 90, "is_default": 1 },
+    { "user_ref": "13800000005", "name": "小电驴", "type": "two_wheeler", "battery_kwh": 2, "connector_type": "ac_gb", "max_power_kw": 0.5, "is_default": 1 },
+    { "user_ref": "13800001006", "name": "物流厢式车", "type": "light_truck", "battery_kwh": 115, "connector_type": "dc_gb", "max_power_kw": 180, "is_default": 1 },
+    { "user_ref": "13800001007", "name": "休旅车", "type": "car", "battery_kwh": 80, "connector_type": "dc_gb", "max_power_kw": 120, "is_default": 1 },
+    { "user_ref": "13800001008", "name": "通勤轿车", "type": "car", "battery_kwh": 55, "connector_type": "ac_gb", "max_power_kw": 11, "is_default": 1 },
+    { "user_ref": "13800001009", "name": "快车专车", "type": "car", "battery_kwh": 66, "connector_type": "dc_gb", "max_power_kw": 100, "is_default": 1 },
+    { "user_ref": "13800001010", "name": "搬家货车", "type": "light_truck", "battery_kwh": 95, "connector_type": "dc_gb", "max_power_kw": 140, "is_default": 1 },
+    { "user_ref": "13800001011", "name": "配送电驴", "type": "two_wheeler", "battery_kwh": 3, "connector_type": "ac_gb", "max_power_kw": 0.6, "is_default": 1 },
+    { "user_ref": "13800001012", "name": "电动轿车", "type": "car", "battery_kwh": 70, "connector_type": "dc_gb", "max_power_kw": 220, "is_default": 1 },
+    { "user_ref": "13800002001", "name": "京牌电车", "type": "car", "battery_kwh": 68, "connector_type": "dc_gb", "max_power_kw": 120, "is_default": 1 },
+    { "user_ref": "13800002002", "name": "苏E通勤车", "type": "car", "battery_kwh": 62, "connector_type": "dc_gb", "max_power_kw": 100, "is_default": 1 },
+    { "user_ref": "13800002003", "name": "网约专车", "type": "car", "battery_kwh": 66, "connector_type": "dc_gb", "max_power_kw": 120, "is_default": 1 },
+    { "user_ref": "13800002004", "name": "冷链货柜车", "type": "light_truck", "battery_kwh": 120, "connector_type": "dc_gb", "max_power_kw": 200, "is_default": 1 },
+    { "user_ref": "13800002005", "name": "郊游SUV", "type": "car", "battery_kwh": 88, "connector_type": "dc_gb", "max_power_kw": 150, "is_default": 1 }
+  ],
+
+  "coupon": [
+    {
+      "_注释": "优惠券模板。total=-1 表示不限量。注意: 后续发券逻辑硬编码取 id=1(此处第一张), 请勿改动本表顺序",
+      "title": "新人立减5元", "type": "new_user", "discount_amount": 5, "min_amount": 0,
+      "station_ref": null, "time_range": "", "valid_days": 30, "total": -1, "status": "active", "create_days_ago": 60
+    },
+    { "title": "满50减8", "type": "full_reduction", "discount_amount": 8, "min_amount": 50,
+      "station_ref": null, "time_range": "", "valid_days": 15, "total": 500, "status": "active", "create_days_ago": 30 },
+    { "title": "夜间充电券", "type": "night", "discount_amount": 3, "min_amount": 0,
+      "station_ref": null, "time_range": "22:00-06:00", "valid_days": 30, "total": -1, "status": "active", "create_days_ago": 30 },
+    { "title": "满100减15", "type": "full_reduction", "discount_amount": 15, "min_amount": 100,
+      "station_ref": null, "time_range": "", "valid_days": 20, "total": 200, "status": "active", "create_days_ago": 25 },
+    { "title": "周末畅充券", "type": "full_reduction", "discount_amount": 6, "min_amount": 0,
+      "station_ref": null, "time_range": "", "valid_days": 10, "total": 100, "status": "active", "create_days_ago": 15 },
+    { "title": "跨年折扣券", "type": "night", "discount_amount": 10, "min_amount": 80,
+      "station_ref": null, "time_range": "", "valid_days": 7, "total": -1, "status": "inactive", "create_days_ago": 10 },
+    { "title": "老用户满40减8", "type": "full_reduction", "discount_amount": 8, "min_amount": 40,
+      "station_ref": null, "time_range": "", "valid_days": 15, "total": 200, "status": "active", "create_days_ago": 12 },
+    { "title": "续充满200减20", "type": "full_reduction", "discount_amount": 20, "min_amount": 200,
+      "station_ref": null, "time_range": "", "valid_days": 30, "total": 50, "status": "active", "create_days_ago": 18 },
+    { "title": "新客专享体验券", "type": "new_user", "discount_amount": 3, "min_amount": 0,
+      "station_ref": null, "time_range": "", "valid_days": 7, "total": -1, "status": "active", "create_days_ago": 5 }
+  ],
+
+  "weather": [
+    { "_注释": "各区域当前天气。area 需与 station.area 对应(另有 全市 汇总)", "area": "全市", "condition": "sunny", "temperature": 27, "forecast": "今日晴, 适合出行" },
+    { "area": "商业区", "condition": "sunny", "temperature": 28, "forecast": "午后有短时云量增多" },
+    { "area": "高新区", "condition": "cloudy", "temperature": 26, "forecast": "多云转晴, 无降水" },
+    { "area": "大学城", "condition": "sunny", "temperature": 27, "forecast": "晴, 紫外线较强" },
+    { "area": "老城区", "condition": "cloudy", "temperature": 26, "forecast": "多云, 体感舒适" },
+    { "area": "滨河区", "condition": "rain", "temperature": 24, "forecast": "有小雨, 注意路面湿滑" },
+    { "area": "城东区", "condition": "sunny", "temperature": 27, "forecast": "晴间多云, 风力较小" },
+    { "area": "新城区", "condition": "cloudy", "temperature": 25, "forecast": "局部多云, 出行注意增减衣物" },
+    { "area": "物流园", "condition": "rain", "temperature": 23, "forecast": "有小到中雨, 路滑慢行" },
+    { "area": "临港区", "condition": "cloudy", "temperature": 25, "forecast": "海风较大, 体感偏凉" },
+    { "area": "郊野", "condition": "sunny", "temperature": 29, "forecast": "晴, 郊游适宜, 注意防晒" },
+    { "area": "商务区", "condition": "cloudy", "temperature": 26, "forecast": "阴天, 无降水" },
+    { "area": "上海·徐汇", "condition": "rain", "temperature": 28, "forecast": "上海有分散阵雨, 携带雨具" },
+    { "area": "上海·浦东", "condition": "cloudy", "temperature": 27, "forecast": "上海多云, 午后放晴" },
+    { "area": "深圳·南山", "condition": "sunny", "temperature": 30, "forecast": "深圳晴热, 需注意防暑" },
+    { "area": "广州·天河", "condition": "rain", "temperature": 29, "forecast": "广州午后雷阵雨" },
+    { "area": "杭州·西湖", "condition": "cloudy", "temperature": 28, "forecast": "杭州多云, 适合出行" },
+    { "area": "成都·天府新区", "condition": "cloudy", "temperature": 25, "forecast": "成都多云, 偶有小雨" },
+    { "area": "武汉·光谷", "condition": "hot", "temperature": 32, "forecast": "武汉高温闷热" },
+    { "area": "南京·江北", "condition": "sunny", "temperature": 29, "forecast": "南京晴, 紫外线较强" },
+    { "area": "西安·高新", "condition": "sunny", "temperature": 30, "forecast": "西安晴, 昼夜温差大" },
+    { "area": "北京·朝阳", "condition": "cloudy", "temperature": 26, "forecast": "北京多云, 午后有风" },
+    { "area": "北京·海淀", "condition": "cloudy", "temperature": 25, "forecast": "北京多云转晴" },
+    { "area": "江苏苏州·园区", "condition": "rain", "temperature": 26, "forecast": "苏州有阵雨, 出行注意" },
+    { "area": "天津·滨海", "condition": "sunny", "temperature": 24, "forecast": "天津晴, 沿海风较大" },
+    { "area": "重庆·两江", "condition": "hot", "temperature": 33, "forecast": "重庆闷热, 午后有雷阵雨" },
+    { "area": "河南郑州·金水", "condition": "sunny", "temperature": 28, "forecast": "郑州晴, 体感舒适" },
+    { "area": "安徽合肥·蜀山", "condition": "cloudy", "temperature": 27, "forecast": "合肥多云, 无降水" },
+    { "area": "湖南长沙·岳麓", "condition": "extreme", "temperature": 34, "forecast": "长沙高温预警, 减少户外" }
+  ],
+
+  "holiday": [
+    { "_注释": "节假日。is_workday=1 表示调休上班日。date 形如 YYYY-MM-DD", "date": "2026-01-01", "name": "元旦", "is_workday": 0 },
+    { "date": "2026-02-16", "name": "春节", "is_workday": 0 }, { "date": "2026-02-17", "name": "春节", "is_workday": 0 },
+    { "date": "2026-02-18", "name": "春节", "is_workday": 0 }, { "date": "2026-04-05", "name": "清明节", "is_workday": 0 },
+    { "date": "2026-05-01", "name": "劳动节", "is_workday": 0 }, { "date": "2026-06-19", "name": "端午节", "is_workday": 0 },
+    { "date": "2026-09-25", "name": "中秋节", "is_workday": 0 }, { "date": "2026-10-01", "name": "国庆节", "is_workday": 0 },
+    { "date": "2026-10-02", "name": "国庆节", "is_workday": 0 }, { "date": "2026-10-03", "name": "国庆节", "is_workday": 0 },
+    { "date": "2026-09-27", "name": "国庆调休上班", "is_workday": 1 }
+  ],
+
+  "member_plan": [
+    {
+      "_注释": "会员套餐。注意: 硬编码逻辑用 plan_id=2(此处第二张=畅充月卡), 请勿改动本表顺序。discount 为小数, 1.0=不打折",
+      "name": "体验周卡", "price": 5.9, "valid_days": 7,
+      "service_fee_discount": 0.90, "night_discount": 0.95, "points_multiplier": 1.2, "description": "服务费9折, 夜间再95折, 1.2倍积分"
+    },
+    { "name": "畅充月卡", "price": 19.9, "valid_days": 30, "service_fee_discount": 0.80, "night_discount": 0.90, "points_multiplier": 1.5, "description": "服务费8折, 夜间再9折, 1.5倍积分" },
+    { "name": "畅充季卡", "price": 49.9, "valid_days": 90, "service_fee_discount": 0.75, "night_discount": 0.85, "points_multiplier": 1.8, "description": "服务费75折, 夜间再85折, 1.8倍积分" },
+    { "name": "畅充年卡", "price": 168.0, "valid_days": 365, "service_fee_discount": 0.70, "night_discount": 0.80, "points_multiplier": 2.0, "description": "服务费7折, 夜间再8折, 双倍积分" }
+  ],
+
+  "faq": [
+    { "_注释": "常见问题。sort=显示排序(小的在前)", "category": "充电", "question": "怎么开始充电?", "answer": "在电站详情选择空闲电桩, 点击开始充电即可。", "sort": 1 },
+    { "category": "费用", "question": "电费怎么计算?", "answer": "电费=分时电价×充电量, 谷/平/峰价格见电站详情。", "sort": 2 },
+    { "category": "账户", "question": "余额如何充值?", "answer": "进入我的-钱包, 输入金额点击充值(模拟支付)。", "sort": 3 },
+    { "category": "故障", "question": "电桩启动失败怎么办?", "answer": "请换桩重试, 并在我的-工单提交故障反馈。", "sort": 4 },
+    { "category": "权益", "question": "vip 会员有哪些权益?", "answer": "vip 会员可享受服务费折扣、夜间折扣与更多积分奖励。", "sort": 5 },
+    { "category": "车辆", "question": "如何添加我的车辆?", "answer": "在我的-车辆管理, 添加车牌与车型即可。", "sort": 6 },
+    { "category": "投诉", "question": "遇到停车费争议怎么办?", "answer": "在订单详情页提交工单, 客服会尽快核实处理。", "sort": 7 },
+    { "category": "积分", "question": "积分有什么用?", "answer": "积分可在积分商城兑换优惠券等权益, 有效期一年。", "sort": 8 },
+    { "category": "充电", "question": "支持哪些充电枪国标?", "answer": "支持直流快充国标 GB/T 与交流慢充, 不同车型请选择对应枪头。", "sort": 9 },
+    { "category": "费用", "question": "停车收费怎么算?", "answer": "部分站点按停车时长收费, 站点详情页会标注停车费规则。", "sort": 10 },
+    { "category": "故障", "question": "充电途中断电怎么办?", "answer": "请确认电桩状态, 联系客服, 我们后台会检查该桩运行记录。", "sort": 11 },
+    { "category": "账户", "question": "如何注销账号?", "answer": "在设置页申请注销, 涉及余额请在注销前结清。", "sort": 12 },
+    { "category": "权益", "question": "月卡能否试用?", "answer": "可以购买体验周卡先试, 觉得合适再升级本月卡。", "sort": 13 }
+  ],
+
+  "notif_seed": [
+    {
+      "_注释": "测试用户消息中心的种子通知。related_id/is_read 此处固定; hours_ago 为发送于几小时前, 实际写入时会叠加每用户 id",
+      "type": "system", "title": "欢迎使用充电服务", "content": "完成首单可获得新人立减券一张", "related_id": 0, "is_read": 1, "hours_ago": 12
+    },
+    { "type": "coupon", "title": "优惠券即将过期", "content": "您有 1 张满50减8 券将在3天后过期", "related_id": 0, "is_read": 0, "hours_ago": 30 },
+    { "type": "order", "title": "订单已结算", "content": "感谢使用, 本次充电已结算完成", "related_id": 0, "is_read": 1, "hours_ago": 6 },
+    { "type": "point", "title": "积分到账", "content": "本次充电获得积分, 可在积分商城使用", "related_id": 0, "is_read": 0, "hours_ago": 5 },
+    { "type": "reservation", "title": "排队提醒", "content": "您预约的电站已有空闲电桩", "related_id": 0, "is_read": 0, "hours_ago": 2 },
+    { "type": "system", "title": "夜间充电优惠", "content": "00:00-08:00 谷电时段服务费有优惠", "related_id": 0, "is_read": 0, "hours_ago": 48 },
+    { "type": "coupon", "title": "会员权益升级", "content": "恭喜您成为 vip 会员, 尽享折扣与优惠券回馈", "related_id": 0, "is_read": 0, "hours_ago": 20 },
+    { "type": "reservation", "title": "附近新增电站", "content": "您收藏的区域新增了电站, 快去看看吧", "related_id": 0, "is_read": 1, "hours_ago": 3 }
+  ]
+}

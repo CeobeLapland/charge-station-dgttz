@@ -643,6 +643,39 @@ QVariantMap buildPortrait(const QList<OrderSeed>& orders) {
     });
 }
 
+// —— 我的评论（review，社区/评价占位数据）——
+QVariantList buildMyReviews() {
+    return S_list({
+        S({
+            {"id",             7001},
+            {"station_name",   QStringLiteral("自营·中关村软件园旗舰站")},
+            {"overall_score",  4.6},
+            {"tags",           QStringList{QStringLiteral("充电快"), QStringLiteral("车位多")}},
+            {"content",        QStringLiteral("中午来人不算多，快充功率很给力，二十分钟从 12% 到 85%。")},
+            {"create_time",    QStringLiteral("2025-01-18 12:40:00")},
+            {"useful_count",   6}
+        }),
+        S({
+            {"id",             7002},
+            {"station_name",   QStringLiteral("星星充·国贸中心旗舰站")},
+            {"overall_score",  4.2},
+            {"tags",           QStringList{QStringLiteral("充电较贵"), QStringLiteral("位置方便")}},
+            {"content",        QStringLiteral("高峰期过来排队久，不过桩多，等 10 分钟左右。周边吃饭方便。")},
+            {"create_time",    QStringLiteral("2024-10-05 19:20:00")},
+            {"useful_count",   3}
+        }),
+        S({
+            {"id",             7003},
+            {"station_name",   QStringLiteral("特来电·苏州金鸡湖站")},
+            {"overall_score",  4.8},
+            {"tags",           QStringList{QStringLiteral("环境好"), QStringLiteral("慢充安静")}},
+            {"content",        QStringLiteral("晚上谷电慢充超划算，湖边风景不错，躺着等也不无聊。")},
+            {"create_time",    QStringLiteral("2024-06-22 22:15:00")},
+            {"useful_count",   11}
+        })
+    });
+}
+
 // —— 会员套餐模板（member_plan 表）——
 QVariantList buildMemberPlans() {
     return {
@@ -712,21 +745,50 @@ UserData::UserData(QObject* parent)
         S({ {"station_id", 11}, {"create_time", now} }),   // 自营·深圳湾科技园站
         S({ {"station_id", 15}, {"create_time", now} })    // 特来电·苏州金鸡湖站
     };
+    // —— 服务端缓存初始化为种子（离线与在线展示一致）——
+    const auto seeds = orderSeeds();
+    for (const auto& o : seeds)
+        m_orders.append(buildOrder(o));
+    for (const auto& c : buildCoupons())
+        m_coupons.append(c.toMap());
+    for (const auto& r : buildPointRecords())
+        m_pointRecords.append(r.toMap());
+    for (const auto& n : buildNotifications())
+        m_notifications.append(n.toMap());
+    for (const auto& p : buildMemberPlans())
+        m_memberPlans.append(p.toMap());
+    for (const auto& w : buildWallet())
+        m_walletTransactions.append(w.toMap());
+    for (const auto& r : buildMyReviews())
+        m_myReviews.append(r.toMap());
 }
 
-QVariantMap UserData::profile() const {
+QVariantMap UserData::seedProfile() const {
     return S({
         {"id",              3},
         {"phone",           kPhone},
         {"nickname",        m_nickname},
         {"avatar_path",     m_avatarPath},
         {"balance",         m_balance},
-        {"points",          1280},
-        {"level",           QStringLiteral("vip")},
+        {"points",          m_points},
+        {"level",           m_level},
         {"status",          QStringLiteral("normal")},
         {"register_time",   QStringLiteral("2024-11-02 09:30:00")},
         {"last_login_time", QStringLiteral("2025-08-20 08:15:00")}
     });
+}
+
+QVariantMap UserData::profile() const {
+    // 种子打底 + 服务端字段覆盖 + 本地可变字段优先
+    QVariantMap p = seedProfile();
+    for (auto it = m_profile.cbegin(); it != m_profile.cend(); ++it)
+        p.insert(it.key(), it.value());
+    p.insert(QStringLiteral("nickname"), m_nickname);
+    p.insert(QStringLiteral("avatar_path"), m_avatarPath);
+    p.insert(QStringLiteral("balance"), m_balance);
+    p.insert(QStringLiteral("points"), m_points);
+    p.insert(QStringLiteral("level"), m_level);
+    return p;
 }
 
 QVariantList UserData::vehicles() const {
@@ -736,10 +798,8 @@ QVariantList UserData::vehicles() const {
 }
 
 QVariantList UserData::orders() const {
-    static const auto seeds = orderSeeds();
     QVariantList out;
-    for (const auto& o : seeds)
-        out.append(buildOrder(o));
+    for (const auto& m : m_orders) out.append(m);
     // 按 create_time 降序（新在前）
     std::sort(out.begin(), out.end(), [](const QVariant& a, const QVariant& b) {
         return a.toMap().value(QStringLiteral("create_time")).toString()
@@ -749,8 +809,7 @@ QVariantList UserData::orders() const {
 }
 
 QVariantMap UserData::orderById(int orderId) const {
-    for (const auto& v : orders()) {
-        auto m = v.toMap();
+    for (const auto& m : m_orders) {
         if (m.value(QStringLiteral("id")).toInt() == orderId)
             return m;
     }
@@ -758,39 +817,83 @@ QVariantMap UserData::orderById(int orderId) const {
 }
 
 QVariantList UserData::orderTimeline(int orderId) const {
+    if (m_timelines.contains(orderId))
+        return m_timelines.value(orderId);
     return buildTimeline(orderId);
 }
 
 QVariantList UserData::coupons() const {
-    static const QVariantList s = buildCoupons();
-    return s;
+    QVariantList out;
+    for (const auto& m : m_coupons) out.append(m);
+    return out;
 }
 
 QVariantList UserData::pointRecords() const {
-    static const QVariantList s = buildPointRecords();
-    return s;
+    QVariantList out;
+    for (const auto& m : m_pointRecords) out.append(m);
+    return out;
 }
 
 QVariantList UserData::walletTransactions() const {
-    static const QVariantList s = buildWallet();
-    return s;
+    QVariantList out;
+    for (const auto& m : m_walletTransactions) out.append(m);
+    return out;
 }
 
 QVariantList UserData::notifications() const {
-    static const QVariantList s = buildNotifications();
-    return s;
+    QVariantList out;
+    for (const auto& m : m_notifications) out.append(m);
+    return out;
 }
 
 QVariantMap UserData::portrait() const {
-    static const auto seeds = orderSeeds();
-    static const QVariantMap s = buildPortrait(seeds);
-    return s;
+    if (!m_portrait.isEmpty())
+        return m_portrait;
+    // 由订单聚合（与种子口径一致）：已完成订单的频次/电量/常去电站/快慢偏好
+    int completed = 0;
+    double energySum = 0.0;
+    QHash<int, int> stationCount;
+    int fastCount = 0, slowCount = 0;
+    for (const auto& m : m_orders) {
+        const QString status = m.value(QStringLiteral("status")).toString();
+        if (status == QStringLiteral("completed")) {
+            completed++;
+            energySum += m.value(QStringLiteral("energy_kwh")).toDouble();
+            stationCount[m.value(QStringLiteral("station_id")).toInt()]++;
+        }
+        if (m.value(QStringLiteral("charger_type")).toString() == QStringLiteral("fast")) fastCount++;
+        else slowCount++;
+    }
+    int favStation = 0, favMax = 0;
+    for (auto it = stationCount.cbegin(); it != stationCount.cend(); ++it) {
+        if (it.value() > favMax) { favMax = it.value(); favStation = it.key(); }
+    }
+    QString favName;
+    for (const auto& m : m_orders) {
+        if (m.value(QStringLiteral("station_id")).toInt() == favStation) {
+            favName = m.value(QStringLiteral("station_name")).toString();
+            break;
+        }
+    }
+    const int months = 6;  // 示例口径：约半年
+    const double monthAvg = completed / static_cast<double>(months);
+    const double avgEnergy = completed > 0 ? energySum / completed : 0.0;
+    return S({
+        {"month_avg_count",   monthAvg},
+        {"avg_energy_kwh",    avgEnergy},
+        {"favorite_station",  favName},
+        {"usual_hours",       QStringLiteral("18:00–21:00")},
+        {"prefer_type",       fastCount >= slowCount ? QStringLiteral("快充") : QStringLiteral("慢充")}
+    });
 }
 
 bool UserData::recharge(double amount) {
-    if (amount <= 0.0)
+    if (amount == 0.0)
         return false;
     m_balance += amount;
+    // 正向充值同步服务端（示例阶段为乐观更新，余额以服务端响应回写为准）
+    if (amount > 0.0 && m_sendBackend)
+        m_sendBackend(QStringLiteral("user.recharge"), S({{"amount", amount}}));
     emit profileChanged();
     return true;
 }
@@ -800,12 +903,16 @@ bool UserData::updateNickname(const QString& nickname) {
     if (trimmed.isEmpty() || trimmed.size() < 2 || trimmed.size() > 20)
         return false;
     m_nickname = trimmed;
+    if (m_sendBackend)
+        m_sendBackend(QStringLiteral("user.update_profile"), S({{"nickname", trimmed}}));
     emit profileChanged();
     return true;
 }
 
 bool UserData::updateAvatar(const QString& avatarPath) {
     m_avatarPath = avatarPath;
+    if (m_sendBackend)
+        m_sendBackend(QStringLiteral("user.update_profile"), S({{"avatar_path", avatarPath}}));
     emit profileChanged();
     return true;
 }
@@ -823,13 +930,15 @@ double UserData::totalEnergyKwh() const {
 }
 
 QVariantList UserData::memberPlans() const {
-    static const QVariantList s = buildMemberPlans();
-    return s;
+    QVariantList out;
+    for (const auto& m : m_memberPlans) out.append(m);
+    return out;
 }
 
 QVariantMap UserData::currentPlan() const {
-    for (const auto& v : memberPlans()) {
-        auto m = v.toMap();
+    if (!m_currentPlan.isEmpty())
+        return m_currentPlan;
+    for (const auto& m : m_memberPlans) {
         if (m.value(QStringLiteral("id")).toInt() == m_currentPlanId) {
             return S({
                 {"plan_id",           m_currentPlanId},
@@ -851,12 +960,13 @@ QVariantMap UserData::currentPlan() const {
 }
 
 bool UserData::subscribePlan(int planId) {
-    // 简单模拟：只要在套餐列表里就订阅成功
-    for (const auto& v : memberPlans()) {
-        auto m = v.toMap();
+    // 简单模拟：只要在套餐列表里就订阅成功；接服务端后同步发 plan.subscribe
+    for (const auto& m : m_memberPlans) {
         if (m.value(QStringLiteral("id")).toInt() == planId
             && m.value(QStringLiteral("status")).toString() == QStringLiteral("active")) {
             m_currentPlanId = planId;
+            if (m_sendBackend)
+                m_sendBackend(QStringLiteral("plan.subscribe"), S({{"plan_id", planId}}));
             emit profileChanged();
             return true;
         }
@@ -884,19 +994,23 @@ bool UserData::toggleFavorite(int stationId) {
     for (int i = 0; i < m_favorites.size(); ++i) {
         if (m_favorites[i].value(QStringLiteral("station_id")).toInt() == stationId) {
             m_favorites.removeAt(i);
+            if (m_sendBackend)
+                m_sendBackend(QStringLiteral("favorite.remove"), S({{"station_id", stationId}}));
             emit favoritesChanged();
             return false;   // 取消收藏
         }
     }
     auto now = QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"));
     m_favorites.append(S({ {"station_id", stationId}, {"create_time", now} }));
+    if (m_sendBackend)
+        m_sendBackend(QStringLiteral("favorite.add"), S({{"station_id", stationId}}));
     emit favoritesChanged();
     return true;   // 新增收藏
 }
 
 // —— 我的评论（review，社区/评价占位数据）——
 QVariantList UserData::myReviews() const {
-    return S_list({
+    /*return S_list({
         S({
             {"id",             7001},
             {"station_name",   QStringLiteral("自营·中关村软件园旗舰站")},
@@ -924,10 +1038,13 @@ QVariantList UserData::myReviews() const {
             {"create_time",    QStringLiteral("2024-06-22 22:15:00")},
             {"useful_count",   11}
         })
-    });
+    });*/
+    QVariantList out;
+    for (const auto& m : m_myReviews) out.append(m);
+    return out;
 }
 
-// —— 我的车辆变更（内存态）——
+// —— 我的车辆变更（内存态 + 同步服务端）——
 int UserData::addVehicle(const QVariantMap& in) {
     int maxId = 99;
     for (const auto& m : m_vehicles)
@@ -946,6 +1063,8 @@ int UserData::addVehicle(const QVariantMap& in) {
             v.insert(key, QVariant());
     }
     m_vehicles.append(v);
+    if (m_sendBackend)
+        m_sendBackend(QStringLiteral("vehicle.add"), v);
     emit vehiclesChanged();
     return v.value(QStringLiteral("id")).toInt();
 }
@@ -955,6 +1074,11 @@ bool UserData::updateVehicle(int vehicleId, const QVariantMap& in) {
         if (m.value(QStringLiteral("id")).toInt() == vehicleId) {
             for (auto it = in.cbegin(); it != in.cend(); ++it)
                 m.insert(it.key(), it.value());
+            if (m_sendBackend) {
+                QVariantMap p = in;
+                p.insert(QStringLiteral("vehicle_id"), vehicleId);
+                m_sendBackend(QStringLiteral("vehicle.update"), p);
+            }
             emit vehiclesChanged();
             return true;
         }
@@ -966,9 +1090,240 @@ bool UserData::removeVehicle(int vehicleId) {
     for (int i = 0; i < m_vehicles.size(); ++i) {
         if (m_vehicles[i].value(QStringLiteral("id")).toInt() == vehicleId) {
             m_vehicles.removeAt(i);
+            if (m_sendBackend)
+                m_sendBackend(QStringLiteral("vehicle.delete"), S({{"vehicle_id", vehicleId}}));
             emit vehiclesChanged();
             return true;
         }
     }
     return false;
 }
+
+// ==================== 服务端数据写入（BackendBridge 调用）====================
+
+void UserData::applyUser(const QVariantMap& u) {
+    if (u.isEmpty())
+        return;
+    m_profile = u;
+    m_nickname = u.value(QStringLiteral("nickname"), m_nickname).toString();
+    m_avatarPath = u.value(QStringLiteral("avatar_path"), m_avatarPath).toString();
+    m_balance = u.value(QStringLiteral("balance"), m_balance).toDouble();
+    m_points = u.value(QStringLiteral("points"), m_points).toInt();
+    m_level = u.value(QStringLiteral("level"), m_level).toString();
+    emit profileChanged();
+}
+
+void UserData::applyPortrait(const QVariantMap& p) {
+    m_portrait = p;
+    emit profileChanged();
+}
+
+void UserData::applyOrders(const QVariantList& orders) {
+    m_orders.clear();
+    for (const auto& v : orders) {
+        QVariantMap o = v.toMap();
+        // 服务端 order 缺展示字段，按 mock 形状兜底
+        if (!o.contains(QStringLiteral("charger_type")))
+            o.insert(QStringLiteral("charger_type"), QStringLiteral("fast"));
+        if (!o.contains(QStringLiteral("station_area")))
+            o.insert(QStringLiteral("station_area"), o.value(QStringLiteral("station_name")));
+        if (!o.contains(QStringLiteral("coupon_title")))
+            o.insert(QStringLiteral("coupon_title"), QString());
+        m_orders.append(o);
+    }
+    emit ordersChanged();
+}
+
+void UserData::applyOrderDetail(const QVariantMap& order, const QVariantList& timeline) {
+    if (!order.isEmpty()) {
+        QVariantMap o = order;
+        if (!o.contains(QStringLiteral("charger_type")))
+            o.insert(QStringLiteral("charger_type"), QStringLiteral("fast"));
+        if (!o.contains(QStringLiteral("station_area")))
+            o.insert(QStringLiteral("station_area"), o.value(QStringLiteral("station_name")));
+        if (!o.contains(QStringLiteral("coupon_title")))
+            o.insert(QStringLiteral("coupon_title"), QString());
+        bool found = false;
+        for (auto& m : m_orders) {
+            if (m.value(QStringLiteral("id")).toInt() == o.value(QStringLiteral("id")).toInt()) {
+                m = o;
+                found = true;
+                break;
+            }
+        }
+        if (!found)
+            m_orders.append(o);
+    }
+    if (!timeline.isEmpty())
+        m_timelines.insert(order.value(QStringLiteral("id")).toInt(), timeline);
+    emit ordersChanged();
+}
+
+void UserData::ingestOrder(const QVariantMap& order) {
+    if (order.isEmpty())
+        return;
+    QVariantMap o = order;
+    if (!o.contains(QStringLiteral("charger_type")))
+        o.insert(QStringLiteral("charger_type"), QStringLiteral("fast"));
+    if (!o.contains(QStringLiteral("station_area")))
+        o.insert(QStringLiteral("station_area"), o.value(QStringLiteral("station_name")));
+    if (!o.contains(QStringLiteral("coupon_title")))
+        o.insert(QStringLiteral("coupon_title"), QString());
+    bool found = false;
+    for (auto& m : m_orders) {
+        if (m.value(QStringLiteral("id")).toInt() == o.value(QStringLiteral("id")).toInt()) {
+            m = o;
+            found = true;
+            break;
+        }
+    }
+    if (!found)
+        m_orders.append(o);
+    emit ordersChanged();
+}
+
+void UserData::applyVehicles(const QVariantList& vehicles) {
+    m_vehicles.clear();
+    for (const auto& v : vehicles)
+        m_vehicles.append(v.toMap());
+    emit vehiclesChanged();
+}
+
+void UserData::applyCoupons(const QVariantList& coupons) {
+    m_coupons.clear();
+    for (const auto& v : coupons) {
+        QVariantMap c = v.toMap();
+        // valid_days → valid_until（截止日期），scope 兜底
+        if (!c.contains(QStringLiteral("valid_until")) && c.contains(QStringLiteral("valid_days"))) {
+            QDateTime base = QDateTime::fromString(
+                c.value(QStringLiteral("receive_time")).toString(), QStringLiteral("yyyy-MM-dd HH:mm:ss"));
+            if (!base.isValid())
+                base = QDateTime::currentDateTime();
+            c.insert(QStringLiteral("valid_until"),
+                     base.addDays(c.value(QStringLiteral("valid_days")).toInt())
+                         .toString(QStringLiteral("yyyy-MM-dd")));
+        }
+        if (!c.contains(QStringLiteral("scope")))
+            c.insert(QStringLiteral("scope"),
+                     c.value(QStringLiteral("station_id")).toInt() > 0
+                         ? QStringLiteral("指定电站") : QStringLiteral("通用"));
+        m_coupons.append(c);
+    }
+    emit couponsChanged();
+}
+
+void UserData::applyPointRecords(const QVariantList& records, double totalPoints) {
+    m_pointRecords.clear();
+    for (const auto& v : records)
+        m_pointRecords.append(v.toMap());
+    if (totalPoints > 0)
+        m_points = static_cast<int>(totalPoints);
+    emit pointsChanged();
+    emit profileChanged();
+}
+
+void UserData::applyNotifications(const QVariantList& notifications) {
+    m_notifications.clear();
+    for (const auto& v : notifications)
+        m_notifications.append(v.toMap());
+    emit notificationsChanged();
+}
+
+void UserData::applyMemberPlans(const QVariantList& plans) {
+    m_memberPlans.clear();
+    for (const auto& v : plans)
+        m_memberPlans.append(v.toMap());
+    emit memberPlansChanged();
+}
+
+void UserData::applyCurrentPlan(const QVariantMap& plan) {
+    m_currentPlan = plan;
+    if (!plan.isEmpty()) {
+        // 从套餐模板补展示字段（name/price/折扣…）
+        const int pid = plan.value(QStringLiteral("plan_id")).toInt();
+        for (const auto& m : m_memberPlans) {
+            if (m.value(QStringLiteral("id")).toInt() == pid) {
+                if (!m_currentPlan.contains(QStringLiteral("name")))
+                    m_currentPlan.insert(QStringLiteral("name"), m.value(QStringLiteral("name")));
+                if (!m_currentPlan.contains(QStringLiteral("price")))
+                    m_currentPlan.insert(QStringLiteral("price"), m.value(QStringLiteral("price")));
+                if (!m_currentPlan.contains(QStringLiteral("valid_days")))
+                    m_currentPlan.insert(QStringLiteral("valid_days"), m.value(QStringLiteral("valid_days")));
+                if (!m_currentPlan.contains(QStringLiteral("service_fee_discount")))
+                    m_currentPlan.insert(QStringLiteral("service_fee_discount"),
+                                        m.value(QStringLiteral("service_fee_discount")));
+                if (!m_currentPlan.contains(QStringLiteral("night_discount")))
+                    m_currentPlan.insert(QStringLiteral("night_discount"),
+                                        m.value(QStringLiteral("night_discount")));
+                if (!m_currentPlan.contains(QStringLiteral("points_multiplier")))
+                    m_currentPlan.insert(QStringLiteral("points_multiplier"),
+                                        m.value(QStringLiteral("points_multiplier")));
+                if (!m_currentPlan.contains(QStringLiteral("description")))
+                    m_currentPlan.insert(QStringLiteral("description"),
+                                        m.value(QStringLiteral("description")));
+                break;
+            }
+        }
+        // days_left 兜底
+        if (!m_currentPlan.contains(QStringLiteral("days_left"))) {
+            const QDateTime end = QDateTime::fromString(
+                m_currentPlan.value(QStringLiteral("end_time")).toString(),
+                QStringLiteral("yyyy-MM-dd HH:mm:ss"));
+            if (end.isValid())
+                m_currentPlan.insert(QStringLiteral("days_left"),
+                                     qMax(0, QDateTime::currentDateTime().daysTo(end)));
+            else
+                m_currentPlan.insert(QStringLiteral("days_left"), 0);
+        }
+    }
+    emit currentPlanChanged();
+}
+
+void UserData::applyFavorites(const QVariantList& favorites) {
+    m_favorites.clear();
+    for (const auto& v : favorites) {
+        const QVariantMap f = v.toMap();
+        // 统一只记 station_id（QML isFavorite 按 station_id 判断）
+        m_favorites.append(S({
+            {"station_id", f.value(QStringLiteral("station_id"))},
+            {"create_time", f.value(QStringLiteral("create_time"))},
+            {"station_name", f.value(QStringLiteral("station_name"))},
+            {"address", f.value(QStringLiteral("address"))},
+            {"area", f.value(QStringLiteral("area"))}
+        }));
+    }
+    emit favoritesChanged();
+}
+
+void UserData::applyMyReviews(const QVariantList& reviews) {
+    m_myReviews.clear();
+    for (const auto& v : reviews) {
+        QVariantMap r = v.toMap();
+        // tags 服务端可能是逗号分隔字符串，转 QStringList
+        const QVariant tags = r.value(QStringLiteral("tags"));
+        if (tags.metaType().id() == QMetaType::QString)
+            r.insert(QStringLiteral("tags"),
+                     tags.toString().split(',', Qt::SkipEmptyParts));
+        if (!r.contains(QStringLiteral("station_name")))
+            r.insert(QStringLiteral("station_name"), QString());
+        m_myReviews.append(r);
+    }
+    emit myReviewsChanged();
+}
+
+void UserData::applyWallet(const QVariantList& transactions) {
+    m_walletTransactions.clear();
+    for (const auto& v : transactions)
+        m_walletTransactions.append(v.toMap());
+}
+
+void UserData::applyBalance(double balance) {
+    m_balance = balance;
+    emit profileChanged();
+}
+
+void UserData::applyPoints(double points) {
+    m_points = static_cast<int>(points);
+    emit profileChanged();
+}
+// MARKER_TEST_XYZ

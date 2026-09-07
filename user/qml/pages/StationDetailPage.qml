@@ -11,16 +11,22 @@ Item {
     readonly property var stackView: StackView.view
 
     readonly property var st: ExploreData.stationById(stationId) || ({})
-    readonly property var chargers: ExploreData.chargersForStation(stationId)
+    property var chargers: []           // 在线时由 station.detail_resp 回填（chargersChanged 刷新）
     readonly property var priceRules: ExploreData.priceRulesForStation(stationId)
     property var reviews: []
     readonly property var weather: ExploreData.weatherForArea((st.weather_area || st.area) || "")
 
-    // 评论刷新：发评论/点赞/回复后由 ExploreData.reviewsChanged 触发
+    // 接线：打开详情即向服务端要该站电桩（服务端电站 → 真实桩 id/状态；离线时 send 静默丢弃，保留种子）
+    function fetchDetail() {
+        if (backend.isConnected())
+            backend.sendMap("station.detail", { station_id: root.stationId })
+    }
+    // 评论/电桩刷新：服务端回写后由 ExploreData 信号触发
     function reloadReviews() { reviews = ExploreData.reviewsForStation(stationId) }
     Connections {
         target: ExploreData
         function onReviewsChanged() { reloadReviews() }
+        function onChargersChanged() { chargers = ExploreData.chargersForStation(root.stationId) }
     }
     readonly property var myNickname: UserData.profile().nickname || ""
 
@@ -84,7 +90,7 @@ Item {
     // 收藏按钮（右上角，点击收藏/取消）
     property bool isFavorite: false
     function refreshFav() { root.isFavorite = UserData.isFavorite(stationId) }
-    Component.onCompleted: { refreshFav(); reloadReviews() }
+    Component.onCompleted: { refreshFav(); reloadReviews(); fetchDetail() }
     Connections { target: UserData; function onFavoritesChanged() { refreshFav() } }
     Rectangle {
         anchors.top: parent.top; anchors.topMargin: 18
@@ -425,12 +431,25 @@ Item {
         Row {
             anchors.centerIn: parent
             spacing: 16
-            // 导航
+            // 导航（高德 web 路线规划）
             Rectangle {
                 width: 140; height: 48; radius: Theme.radiusSmall
                 color: Theme.background; border.color: Theme.primary; border.width: 1
                 Text { anchors.centerIn: parent; text: qsTr("一键导航"); color: Theme.primary; font.bold: true; font.pixelSize: Theme.fontSizeBase }
-                MouseArea { anchors.fill: parent; onClicked: showToast(qsTr("导航（示例）：腾讯地图路线规划待接入")) }
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: {
+                        if (!root.st || !root.st.longitude || !root.st.latitude) {
+                            showToast(qsTr("该电站暂无坐标，无法导航"))
+                            return
+                        }
+                        root.stackView.push("qrc:/UserClient/qml/pages/NavRoutePage.qml", {
+                            fromLng: 116.397128, fromLat: 39.916527,   // 模拟定位（北京·朝阳）
+                            toLng: Number(root.st.longitude), toLat: Number(root.st.latitude),
+                            toName: root.st.name || qsTr("目的地")
+                        })
+                    }
+                }
             }
             // 立即预约（充电全流程统一入口）
             Rectangle {

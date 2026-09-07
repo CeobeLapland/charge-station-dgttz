@@ -16,7 +16,15 @@ Item {
 
     // ===================== 数据与定位 =====================
     readonly property var myLoc: { "lng": 116.397128, "lat": 39.916527 }   // 模拟定位（北京·朝阳）
-    readonly property var stationsAll: ExploreData.stations()
+    property var stationsAll: ExploreData.stations()   // 服务端 nearby 回写后刷新
+    Connections {
+        target: ExploreData
+        function onStationsChanged() {
+            stationsAll = ExploreData.stations()
+            root.recompute()
+            if (mapReady) js("setStations(" + JSON.stringify(stationsAll) + ")")
+        }
+    }
     readonly property var vehiclesData: UserData.vehicles()
     readonly property var activeOrders: {         // 进行中行程：实时流程优先（含排队/已预约/充电/待结算），叠加种子充电订单
         var out = []
@@ -123,19 +131,33 @@ Item {
         }
         return (useRec && rated) ? rated : best
     }
+    property bool reserving: false   // 预约请求在途：等服务端/本地 mock 的 join 响应再跳页（响应是异步的）
     function quickReserve(useRec) {
         if (!vehiclesData.length) { root.showToast(qsTr("请先到「我的」添加车辆")); return }
         var st = root.pickStation(useRec)
         if (!st) { root.showToast(qsTr("附近暂无空闲桩，稍后再试")); return }
         var veh = vehiclesData[0]
+        root.reserving = true
         ChargingFlow.startCharge(Number(st.id), "immediate", "",
                                  Number(veh.id || 0), 80, "fast")
-        if (ChargingFlow.phase === "scan_pending")
-            root.stackView.push("qrc:/UserClient/qml/pages/ReservedPage.qml")
-        else if (ChargingFlow.phase === "queued")
-            root.stackView.push("qrc:/UserClient/qml/pages/QueuePage.qml")
-        else
-            root.showToast(qsTr("暂无可预约电站，请重试"))
+    }
+    Connections {
+        target: ChargingFlow
+        function onStateChanged() {
+            if (!root.reserving) return
+            if (ChargingFlow.phase === "scan_pending") {
+                root.reserving = false
+                root.stackView.push("qrc:/UserClient/qml/pages/ReservedPage.qml")
+            } else if (ChargingFlow.phase === "queued") {
+                root.reserving = false
+                root.stackView.push("qrc:/UserClient/qml/pages/QueuePage.qml")
+            }
+        }
+        function onAbnormal(title, sub) {
+            if (!root.reserving) return
+            root.reserving = false
+            root.showToast(title + "：" + sub)
+        }
     }
 
     // ===================== 筛选 / 排序 =====================
