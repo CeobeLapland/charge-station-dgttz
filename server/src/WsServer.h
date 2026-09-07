@@ -91,10 +91,15 @@ private:
     // ---- 管理端 admin.* ----
     QJsonObject handleAdminLogin(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
     QJsonObject handleAdminRevenue(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+    QJsonObject handleAdminOrderDailyStats(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+    QJsonObject handleAdminStationRevenueShare(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
     QJsonObject handleAdminStationStatus(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
     QJsonObject handleAdminStationList(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
     QJsonObject handleAdminStationDetail(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
     QJsonObject handleAdminStationAdd(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+    QJsonObject handleAdminStationStatusAction(QWebSocket *sock, const QJsonObject &payload,
+                                                   int &code, QString &message, const QString &status);
+    QJsonObject handleAdminChargerAdd(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
     QJsonObject handleAdminChargerList(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
     QJsonObject handleAdminChargerAction(QWebSocket *sock, const QJsonObject &payload, int &code,
                                          QString &message, const QString &action);

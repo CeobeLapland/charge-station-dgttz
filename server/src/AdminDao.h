@@ -27,6 +27,18 @@ struct RevenueSummary {
     double total = 0;            // 历史累计实收
 };
 
+struct DailyOrderStat {
+    QString date;
+    int     orderCount = 0;
+    double  energyKwh = 0;
+};
+struct StationRevenueStat {
+    int     stationId = 0;
+    QString stationName;
+    double  revenue = 0;
+    double  share = 0;
+};
+
 // 电桩状态分布(管理端首页环形图)
 struct StatusDistribution {
     int charging = 0, idle = 0, fault = 0, offline = 0, reserved = 0, rebooting = 0;
@@ -45,6 +57,7 @@ struct StationFull {
     QString facilitiesJson;        // 库里存的是 JSON 文本, 由 WsServer 解析成数组
     QString ownerType;
     int     hasSwap = 0;
+    QString status = QStringLiteral("active"); // active / frozen
     int     freeChargers = 0;      // 实时统计
 };
 
@@ -91,6 +104,8 @@ std::optional<AdminAccount> adminLogin(const QString &account, const QString &pa
 // ---- 统计 ----
 // 近 days 天营收趋势 + 今日/本月/累计。无订单的日子补 0, 保证前端折线不断。
 RevenueSummary revenue(int days);
+QList<DailyOrderStat> orderDailyStats();
+QList<StationRevenueStat> stationRevenueShare();
 
 // 全部电桩的状态分布。
 StatusDistribution chargerStatusDistribution();
@@ -116,15 +131,24 @@ QList<DeviceLogRow> listDeviceLogs(int chargerId);
 // 对电桩执行运维动作并记一条 device_log。
 //   action = "restart" → status 置 rebooting
 //   action = "pause"   → status 置 offline
+//   action = "resume"  → status 恢复 idle
 // 电桩不存在、或该桩上有进行中订单(reserved/charging)时返回 nullopt。
 // busyOut 不为空时回填"是否因为有进行中订单而被拒绝", 用于区分 4001 和 3002。
 std::optional<DeviceLogRow> chargerAction(int chargerId, const QString &action,
                                           const QString &opAccount, bool *busyOut = nullptr);
+
+// 冻结/恢复电站。status 只能是 active / frozen。
+std::optional<StationFull> setStationStatus(int stationId, const QString &status);
 
 // 冻结/解冻用户。status 只能是 normal / frozen。
 std::optional<UserRow> setUserStatus(int userId, const QString &status);
 
 // 新增电站。返回新建的电站(含自增 id)。
 std::optional<StationFull> addStation(const StationFull &s);
+
+// 给已有电站新增一台电桩。
+// stationId 对应已有电站；type 为 fast / slow；power 为额定功率(kW)。
+// 电站不存在或新增失败时返回 nullopt。
+std::optional<ChargerFull> addCharger(int stationId, const QString &type, double power);
 
 }  // namespace dao
