@@ -16,13 +16,15 @@ public:
     static QJsonObject addStation(const QJsonObject& station);
     static QJsonObject chargerRestart(int chargerId);
     static QJsonObject chargerPause(int chargerId);
-    static QJsonObject chargerResume(int chargerId);
     static QJsonObject addCharger(const QJsonObject& charger);
     static QJsonObject toggleUserStatus(int userId, const QString& status);
     static QJsonObject deviceLogs(int chargerId);
     static QJsonObject healthRanks();
     static QJsonObject stationPause(int stationId);
     static QJsonObject stationResume(int stationId);
+    static QJsonObject chargerResume(int chargerId);
+    static QJsonObject orderDailyStats();
+    static QJsonObject stationRevenueShare();
 
 private:
     static QJsonObject okPayload(const QJsonObject& payload);

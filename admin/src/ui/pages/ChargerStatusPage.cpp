@@ -93,6 +93,13 @@ ChargerStatusPage::ChargerStatusPage(ApiClient* api, QWidget* parent)
     layout->addWidget(riskLabel);
     layout->addWidget(m_riskTable);
 
+    connect(m_riskTable, &QTableWidget::cellDoubleClicked, this,
+            [this](int row, int) {
+        if (row < 0 || row >= m_riskTable->rowCount()) {
+            return;
+        }
+        emit openChargerRequested(m_riskTable->item(row, 0)->text().toInt());
+    });
     connect(m_table, &QTableWidget::cellDoubleClicked, this,
             [this](int row, int) {
         if (row < 0 || row >= m_table->rowCount()) {

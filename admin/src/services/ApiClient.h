@@ -28,7 +28,6 @@ public:
     void addStation(const QJsonObject& station, ResponseCb cb);
     void restartCharger(int chargerId, ResponseCb cb);
     void pauseCharger(int chargerId, ResponseCb cb);
-    void resumeCharger(int chargerId, ResponseCb cb);
     void addCharger(const QJsonObject& charger, ResponseCb cb);
     void toggleUserStatus(int userId, const QString& status, ResponseCb cb);
     void fetchDeviceLogs(int chargerId, ResponseCb cb);
@@ -37,6 +36,9 @@ public:
     void fetchHealthRanks(ResponseCb cb);
     void pauseStation(int stationId, ResponseCb cb);
     void resumeStation(int stationId, ResponseCb cb);
+    void resumeCharger(int chargerId, ResponseCb cb);
+    void fetchOrderDailyStats(ResponseCb cb);
+    void fetchStationRevenueShare(ResponseCb cb);
 
 signals:
     void connectionStateChanged(bool connected);

@@ -1,4 +1,5 @@
 #pragma once
+#include <QHash>
 #include <QList>
 #include <QWidget>
 #include <QJsonObject>
@@ -67,4 +68,7 @@ private:
     QList<double> m_dayAmounts;
     QList<double> m_dayEnergies;
     QList<double> m_dayOrders;
+    QHash<QString, int> m_ordersByDate;
+    QHash<QString, double> m_energyByDate;
+    QList<QPair<QString, double>> m_stationRows;
 };
