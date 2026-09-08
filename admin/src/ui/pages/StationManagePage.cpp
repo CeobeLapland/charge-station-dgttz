@@ -24,7 +24,7 @@
 #endif
 
 #ifdef HAS_WEBENGINE
-#include <QtWebEngineWidgets/QWebEnginePage>
+#include <QtWebEngineCore/QWebEnginePage>
 #include <QtWebEngineWidgets/QWebEngineView>
 #endif
 #include "services/ApiClient.h"
