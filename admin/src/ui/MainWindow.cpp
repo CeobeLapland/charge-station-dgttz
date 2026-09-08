@@ -101,6 +101,16 @@ MainWindow::MainWindow(ApiClient* api, const QString& account, QWidget* parent)
             }
         }
     });
+    connect(m_stationManagePage, &StationManagePage::openChargerRequested, this,
+            [this](int chargerId) {
+        for (int i = 0; i < m_navList->count(); ++i) {
+            if (m_navList->item(i)->text() == QStringLiteral("充电桩管理")) {
+                m_navList->setCurrentRow(i);
+                m_chargerManagePage->focusCharger(chargerId);
+                break;
+            }
+        }
+    });
     connect(m_navList, &QListWidget::currentRowChanged, m_pages, &QStackedWidget::setCurrentIndex);
     connect(logoutBtn, &QPushButton::clicked, this, &MainWindow::onLogout);
     connect(aiBtn, &QPushButton::clicked, this, &MainWindow::onAiAssistant);

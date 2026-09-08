@@ -34,6 +34,9 @@ public:
 
     // 增强模块（占位）
     void fetchHealthRanks(ResponseCb cb);
+    void pauseStation(int stationId, ResponseCb cb);
+    void resumeStation(int stationId, ResponseCb cb);
+    void resumeCharger(int chargerId, ResponseCb cb);
     void fetchOrderDailyStats(ResponseCb cb);
     void fetchStationRevenueShare(ResponseCb cb);
 
