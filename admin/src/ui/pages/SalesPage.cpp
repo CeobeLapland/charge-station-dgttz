@@ -1,6 +1,7 @@
 #include "ui/pages/SalesPage.h"
 
 #include <QCursor>
+#include <algorithm>
 #include <QColor>
 #include <QComboBox>
 #include <QEvent>
@@ -333,17 +334,36 @@ void SalesPage::refresh(int days) {
             shares = payload.value(QStringLiteral("station_share")).toArray();
         }
         double shareTotal = 0.0;
+        // 站点营收占比：Top5 + 其他（按营收排序，避免图太挤）
+        QList<QPair<QString, double>> items;
         for (const QJsonValue& sv : shares) {
-            shareTotal += sv.toObject().value(QStringLiteral("value")).toDouble();
+            const QJsonObject o = sv.toObject();
+            items.append({o.value(QStringLiteral("name")).toString(),
+                          o.value(QStringLiteral("value")).toDouble()});
+        }
+        shareTotal = 0.0;
+        for (const auto& it : items) {
+            shareTotal += it.second;
+        }
+        std::sort(items.begin(), items.end(),
+                  [](const QPair<QString, double>& a, const QPair<QString, double>& b) {
+                      return a.second > b.second;
+                  });
+        if (items.size() > 5) {
+            double otherSum = 0.0;
+            while (items.size() > 5) {
+                otherSum += items.last().second;
+                items.removeLast();
+            }
+            items.append({QStringLiteral("其他"), otherSum});
         }
         const QList<QColor> pieColors = {
             QColor(0x4f, 0x9e, 0xff), QColor(0x34, 0xc9, 0x8e),
             QColor(0xff, 0xb0, 0x4d), QColor(0xf2, 0x5f, 0x5c),
             QColor(0xb3, 0x88, 0xff)};
-        for (int i = 0; i < shares.size(); ++i) {
-            const QJsonObject s = shares.at(i).toObject();
-            const QString name = s.value(QStringLiteral("name")).toString();
-            const double v = s.value(QStringLiteral("value")).toDouble();
+        for (int i = 0; i < items.size(); ++i) {
+            const QString name = items.at(i).first;
+            const double v = items.at(i).second;
             const double pct = shareTotal > 0.0 ? (v / shareTotal * 100.0) : 0.0;
             QPieSlice* slice = m_pieSeries->append(name, v);
             slice->setColor(pieColors.at(i % pieColors.size()));
