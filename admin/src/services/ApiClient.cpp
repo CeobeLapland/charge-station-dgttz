@@ -91,6 +91,13 @@ void ApiClient::pauseCharger(int chargerId, ResponseCb cb) {
              MockDataProvider::chargerPause(chargerId), cb);
 }
 
+void ApiClient::resumeCharger(int chargerId, ResponseCb cb) {
+    QJsonObject payload;
+    payload.insert(QStringLiteral("charger_id"), chargerId);
+    static const QString kType = QStringLiteral("admin.charger_resume");
+    dispatch(kType, payload,
+             MockDataProvider::chargerResume(chargerId), cb);
+}
 void ApiClient::addCharger(const QJsonObject& charger, ResponseCb cb) {
     // 消息类型：admin.charger_add（组内 spec 待补，server 暂未实现；Mock 下可用）
     static const QString kAdminChargerAdd = QStringLiteral("admin.charger_add");
@@ -110,6 +117,19 @@ void ApiClient::fetchDeviceLogs(int chargerId, ResponseCb cb) {
     dispatch(proto::type::kAdminDeviceLog, payload, MockDataProvider::deviceLogs(chargerId), cb);
 }
 
+void ApiClient::pauseStation(int stationId, ResponseCb cb) {
+    QJsonObject payload;
+    payload.insert(QStringLiteral("station_id"), stationId);
+    static const QString kType = QStringLiteral("admin.station_pause");
+    dispatch(kType, payload, MockDataProvider::stationPause(stationId), cb);
+}
+
+void ApiClient::resumeStation(int stationId, ResponseCb cb) {
+    QJsonObject payload;
+    payload.insert(QStringLiteral("station_id"), stationId);
+    static const QString kType = QStringLiteral("admin.station_resume");
+    dispatch(kType, payload, MockDataProvider::stationResume(stationId), cb);
+}
 void ApiClient::fetchHealthRanks(ResponseCb cb) {
     dispatch(proto::type::kAdminFaultRisk, QJsonObject(), MockDataProvider::healthRanks(), cb);
 }

@@ -11,6 +11,8 @@ class ChargerStatusPage : public QWidget {
     Q_OBJECT
 public:
     explicit ChargerStatusPage(ApiClient* api, QWidget* parent = nullptr);
+signals:
+    void openChargerRequested(int chargerId);
 
 private:
     void refresh();

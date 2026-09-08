@@ -103,6 +103,16 @@ void ChargerManagePage::appendLog(const QString& text) {
     m_logView->append(QStringLiteral("[%1] %2")
                           .arg(QTime::currentTime().toString(QStringLiteral("HH:mm:ss")), text));
 }
+void ChargerManagePage::focusCharger(int chargerId) {
+    for (int row = 0; row < m_table->rowCount(); ++row) {
+        if (m_table->item(row, 0)->data(Qt::UserRole).toInt() == chargerId) {
+            m_table->selectRow(row);
+            m_table->scrollToItem(m_table->item(row, 0));
+            m_table->setCurrentCell(row, 0);
+            return;
+        }
+    }
+}
 void ChargerManagePage::refresh() {
     m_api->fetchChargers(0, [this](int code, const QString&, const QJsonObject& payload) {
         if (code != proto::code::Ok) {

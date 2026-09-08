@@ -421,6 +421,29 @@ QJsonObject MockDataProvider::addCharger(const QJsonObject& charger) {
     payload.insert(QStringLiteral("charger"), c);
     return okPayload(payload);
 }
+QJsonObject MockDataProvider::chargerResume(int chargerId) {
+    QJsonArray& chargers = chargerCache();
+    for (QJsonValueRef cv : chargers) {
+        QJsonObject obj = cv.toObject();
+        if (obj.value(QStringLiteral("id")).toInt() == chargerId) {
+            obj.insert(QStringLiteral("status"), QStringLiteral("idle"));
+            cv = obj;
+            QJsonObject deviceLog;
+            deviceLog.insert(QStringLiteral("id"), chargerId * 100 + 3);
+            deviceLog.insert(QStringLiteral("charger_id"), chargerId);
+            deviceLog.insert(QStringLiteral("action"), QStringLiteral("resume"));
+            deviceLog.insert(QStringLiteral("operator"), QStringLiteral("admin"));
+            deviceLog.insert(QStringLiteral("op_time"), now());
+            deviceLog.insert(QStringLiteral("result"), QStringLiteral("success"));
+            QJsonObject payload;
+            payload.insert(QStringLiteral("charger_id"), chargerId);
+            payload.insert(QStringLiteral("status"), QStringLiteral("idle"));
+            payload.insert(QStringLiteral("device_log"), deviceLog);
+            return okPayload(payload);
+        }
+    }
+    return errPayload(proto::code::DataNotFound, QStringLiteral("电桩不存在"));
+}
 QJsonObject MockDataProvider::toggleUserStatus(int userId, const QString& status) {
     QJsonArray& users = userCache();
     for (QJsonValueRef uv : users) {
@@ -454,6 +477,37 @@ QJsonObject MockDataProvider::deviceLogs(int chargerId) {
     return okPayload(payload);
 }
 
+QJsonObject MockDataProvider::stationPause(int stationId) {
+    QJsonArray& stations = stationCache();
+    for (QJsonValueRef sv : stations) {
+        QJsonObject obj = sv.toObject();
+        if (obj.value(QStringLiteral("id")).toInt() == stationId) {
+            obj.insert(QStringLiteral("status"), QStringLiteral("frozen"));
+            sv = obj;
+            QJsonObject payload;
+            payload.insert(QStringLiteral("station_id"), stationId);
+            payload.insert(QStringLiteral("status"), QStringLiteral("frozen"));
+            return okPayload(payload);
+        }
+    }
+    return errPayload(proto::code::DataNotFound, QStringLiteral("电站不存在"));
+}
+
+QJsonObject MockDataProvider::stationResume(int stationId) {
+    QJsonArray& stations = stationCache();
+    for (QJsonValueRef sv : stations) {
+        QJsonObject obj = sv.toObject();
+        if (obj.value(QStringLiteral("id")).toInt() == stationId) {
+            obj.insert(QStringLiteral("status"), QStringLiteral("active"));
+            sv = obj;
+            QJsonObject payload;
+            payload.insert(QStringLiteral("station_id"), stationId);
+            payload.insert(QStringLiteral("status"), QStringLiteral("active"));
+            return okPayload(payload);
+        }
+    }
+    return errPayload(proto::code::DataNotFound, QStringLiteral("电站不存在"));
+}
 QJsonObject MockDataProvider::healthRanks() {
     QJsonArray ranks;
     QVector<QPair<int, int>> scores;  // health, id

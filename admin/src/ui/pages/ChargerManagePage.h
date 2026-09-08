@@ -9,6 +9,7 @@ class ChargerManagePage : public QWidget {
     Q_OBJECT
 public:
     explicit ChargerManagePage(ApiClient* api, QWidget* parent = nullptr);
+    void focusCharger(int chargerId);
 
 private slots:
     void refresh();
