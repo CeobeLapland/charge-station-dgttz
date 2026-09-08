@@ -34,6 +34,8 @@ public:
 
     // 增强模块（占位）
     void fetchHealthRanks(ResponseCb cb);
+    void fetchOrderDailyStats(ResponseCb cb);
+    void fetchStationRevenueShare(ResponseCb cb);
 
 signals:
     void connectionStateChanged(bool connected);

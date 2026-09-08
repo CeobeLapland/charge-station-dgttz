@@ -110,6 +110,15 @@ void ApiClient::fetchDeviceLogs(int chargerId, ResponseCb cb) {
     dispatch(proto::type::kAdminDeviceLog, payload, MockDataProvider::deviceLogs(chargerId), cb);
 }
 
+void ApiClient::fetchOrderDailyStats(ResponseCb cb) {
+    static const QString kType = QStringLiteral("admin.order_daily_stats");
+    dispatch(kType, QJsonObject(), MockDataProvider::orderDailyStats(), cb);
+}
+
+void ApiClient::fetchStationRevenueShare(ResponseCb cb) {
+    static const QString kType = QStringLiteral("admin.station_revenue_share");
+    dispatch(kType, QJsonObject(), MockDataProvider::stationRevenueShare(), cb);
+}
 void ApiClient::fetchHealthRanks(ResponseCb cb) {
     dispatch(proto::type::kAdminFaultRisk, QJsonObject(), MockDataProvider::healthRanks(), cb);
 }
