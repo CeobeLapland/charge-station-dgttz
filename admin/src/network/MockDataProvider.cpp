@@ -454,6 +454,43 @@ QJsonObject MockDataProvider::deviceLogs(int chargerId) {
     return okPayload(payload);
 }
 
+QJsonObject MockDataProvider::orderDailyStats() {
+    QJsonArray days;
+    const QJsonArray all = salesCache();
+    for (const QJsonValue& v : all) {
+        const QJsonObject it = v.toObject();
+        QJsonObject d;
+        d.insert(QStringLiteral("date"), it.value(QStringLiteral("date")).toString());
+        d.insert(QStringLiteral("order_count"), it.value(QStringLiteral("orders")).toInt());
+        d.insert(QStringLiteral("energy_kwh"),
+                 qRound(it.value(QStringLiteral("energy")).toDouble() * 100.0) / 100.0);
+        days.append(d);
+    }
+    QJsonObject payload;
+    payload.insert(QStringLiteral("days"), days);
+    return okPayload(payload);
+}
+
+QJsonObject MockDataProvider::stationRevenueShare() {
+    QJsonArray stations;
+    const QJsonArray st = stationCache();
+    const QVector<double> weights = {0.30, 0.24, 0.18, 0.16, 0.12};
+    double total = 0.0;
+    for (int i = 0; i < st.size() && i < weights.size(); ++i) {
+        const double revenue = 100000.0 * weights[i];
+        total += revenue;
+        QJsonObject s;
+        s.insert(QStringLiteral("station_id"), st.at(i).toObject().value(QStringLiteral("id")).toInt());
+        s.insert(QStringLiteral("station_name"), st.at(i).toObject().value(QStringLiteral("name")).toString());
+        s.insert(QStringLiteral("revenue"), qRound(revenue * 100.0) / 100.0);
+        s.insert(QStringLiteral("share"), weights[i] * 100.0);
+        stations.append(s);
+    }
+    QJsonObject payload;
+    payload.insert(QStringLiteral("stations"), stations);
+    payload.insert(QStringLiteral("total"), qRound(total * 100.0) / 100.0);
+    return okPayload(payload);
+}
 QJsonObject MockDataProvider::healthRanks() {
     QJsonArray ranks;
     QVector<QPair<int, int>> scores;  // health, id

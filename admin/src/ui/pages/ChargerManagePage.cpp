@@ -99,6 +99,17 @@ void ChargerManagePage::onShowLogs() {
         }
     });
 }
+void ChargerManagePage::focusCharger(int chargerId) {
+    for (int row = 0; row < m_table->rowCount(); ++row) {
+        if (m_table->item(row, 0)->data(Qt::UserRole).toInt() == chargerId) {
+            m_table->selectRow(row);
+            m_table->scrollToItem(m_table->item(row, 0));
+            m_table->setCurrentCell(row, 0);
+            return;
+        }
+    }
+    appendLog(QStringLiteral("未找到充电桩 #%1（可能数据未刷新）").arg(chargerId));
+}
 void ChargerManagePage::appendLog(const QString& text) {
     m_logView->append(QStringLiteral("[%1] %2")
                           .arg(QTime::currentTime().toString(QStringLiteral("HH:mm:ss")), text));
@@ -261,7 +272,7 @@ void ChargerManagePage::onAddCharger() {
                 appendLog(QStringLiteral("新增失败：%1").arg(message));
                 return;
             }
-            appendLog(QStringLiteral("新增充电桩成功（Mock）；真服务端需 server 支持 admin.charger_add）"));
+            appendLog(QStringLiteral("新增充电桩成功（已写入设备列表）"));
             refresh();
         });
     });

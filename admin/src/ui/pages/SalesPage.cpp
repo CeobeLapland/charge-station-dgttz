@@ -204,7 +204,30 @@ SalesPage::SalesPage(ApiClient* api, QWidget* parent)
 }
 
 void SalesPage::refresh(int days) {
-    m_api->fetchRevenue(days,
+    m_api->fetchOrderDailyStats([this, days](int code, const QString&, const QJsonObject& stats) {
+        m_ordersByDate.clear();
+        m_energyByDate.clear();
+        if (code == proto::code::Ok) {
+            const QJsonArray daysArr = stats.value(QStringLiteral("days")).toArray();
+            for (const QJsonValue& v : daysArr) {
+                const QJsonObject d = v.toObject();
+                m_ordersByDate.insert(d.value(QStringLiteral("date")).toString(),
+                                      d.value(QStringLiteral("order_count")).toInt());
+                m_energyByDate.insert(d.value(QStringLiteral("date")).toString(),
+                                      d.value(QStringLiteral("energy_kwh")).toDouble());
+            }
+        }
+        m_api->fetchStationRevenueShare([this, days](int c2, const QString&, const QJsonObject& share) {
+            m_stationRows.clear();
+            if (c2 == proto::code::Ok) {
+                const QJsonArray st = share.value(QStringLiteral("stations")).toArray();
+                for (const QJsonValue& v : st) {
+                    const QJsonObject s = v.toObject();
+                    m_stationRows.append({s.value(QStringLiteral("station_name")).toString(),
+                                          s.value(QStringLiteral("revenue")).toDouble()});
+                }
+            }
+            m_api->fetchRevenue(days,
                         [this, days](int code, const QString&, const QJsonObject& payload) {
         if (code != proto::code::Ok) {
             return;
@@ -223,8 +246,12 @@ void SalesPage::refresh(int days) {
             fullDates << date;
             categories << (date.size() >= 10 ? date.mid(5) : date);
             amounts << item.value(QStringLiteral("amount")).toDouble();
-            energyVals << item.value(QStringLiteral("energy")).toDouble();
-            orderVals << item.value(QStringLiteral("orders")).toDouble();
+            energyVals << (m_energyByDate.contains(date)
+                                     ? m_energyByDate.value(date)
+                                     : item.value(QStringLiteral("energy")).toDouble());
+            orderVals << (m_ordersByDate.contains(date)
+                                    ? m_ordersByDate.value(date)
+                                    : item.value(QStringLiteral("orders")).toDouble());
         }
         m_dayDates = fullDates;
         m_dayAmounts = amounts;
@@ -295,7 +322,16 @@ void SalesPage::refresh(int days) {
         while (!m_pieSeries->isEmpty()) {
             m_pieSeries->remove(m_pieSeries->slices().first());
         }
-        const QJsonArray shares = payload.value(QStringLiteral("station_share")).toArray();
+        QJsonArray shares;
+        for (const auto& row : m_stationRows) {
+            QJsonObject o;
+            o.insert(QStringLiteral("name"), row.first);
+            o.insert(QStringLiteral("value"), row.second);
+            shares.append(o);
+        }
+        if (shares.isEmpty()) {
+            shares = payload.value(QStringLiteral("station_share")).toArray();
+        }
         double shareTotal = 0.0;
         for (const QJsonValue& sv : shares) {
             shareTotal += sv.toObject().value(QStringLiteral("value")).toDouble();
@@ -326,6 +362,8 @@ void SalesPage::refresh(int days) {
                 }
             });
         }
+    });
+        });
     });
 }
 
