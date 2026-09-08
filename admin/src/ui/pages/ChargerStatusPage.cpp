@@ -235,6 +235,15 @@ void ChargerStatusPage::showStatusChargers(const QString& statusKey, const QStri
             tbl->setItem(i, 3, new QTableWidgetItem(
                 QString::number(c.value(QStringLiteral("power")).toDouble())));
         }
+        int jumpId = 0;
+        connect(tbl, &QTableWidget::cellDoubleClicked, &dlg,
+                [&dlg, tbl, &jumpId](int r, int) {
+            if (r < 0 || r >= tbl->rowCount()) {
+                return;
+            }
+            jumpId = tbl->item(r, 0)->text().toInt();
+            dlg.accept();
+        });
         auto* closeBtn = new QPushButton(QStringLiteral("关闭"));
         auto* btnRow = new QHBoxLayout;
         btnRow->addStretch();
@@ -245,5 +254,8 @@ void ChargerStatusPage::showStatusChargers(const QString& statusKey, const QStri
         connect(closeBtn, &QPushButton::clicked, &dlg, &QDialog::reject);
         dlg.resize(560, 380);
         dlg.exec();
+        if (jumpId > 0) {
+            emit openChargerRequested(jumpId);
+        }
     });
 }

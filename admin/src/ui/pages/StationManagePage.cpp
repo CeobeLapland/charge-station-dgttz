@@ -38,19 +38,23 @@ StationManagePage::StationManagePage(ApiClient* api, QWidget* parent)
     addBtn->setObjectName(QStringLiteral("primaryButton"));
     auto* detailBtn = new QPushButton(QStringLiteral("查看站内详情"));
     auto* refreshBtn = new QPushButton(QStringLiteral("刷新"));
+    auto* pauseBtn = new QPushButton(QStringLiteral("停用电站"));
+    auto* resumeBtn = new QPushButton(QStringLiteral("恢复电站"));
 
     auto* topRow = new QHBoxLayout;
     topRow->addWidget(title);
     topRow->addStretch();
     topRow->addWidget(addBtn);
+    topRow->addWidget(pauseBtn);
+    topRow->addWidget(resumeBtn);
     topRow->addWidget(detailBtn);
     topRow->addWidget(refreshBtn);
 
-    m_table = new QTableWidget(0, 7);
+    m_table = new QTableWidget(0, 8);
     m_table->setHorizontalHeaderLabels({QStringLiteral("ID"), QStringLiteral("站名"),
                                         QStringLiteral("地址"), QStringLiteral("经度"),
                                         QStringLiteral("纬度"), QStringLiteral("总桩数"),
-                                        QStringLiteral("在线率")});
+                                        QStringLiteral("在线率"), QStringLiteral("状态")});
     m_table->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
     m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
@@ -70,7 +74,7 @@ StationManagePage::StationManagePage(ApiClient* api, QWidget* parent)
     });
 #else
     m_mapFallback = new QLabel(QStringLiteral(
-        "电站地图需在 Linux + QWebEngine 环境显示（本页 Windows 占位）"), this);
+        "电站地图需在 Linux + QWebEngine 环境显示"), this);
     m_mapFallback->setAlignment(Qt::AlignCenter);
     m_mapFallback->setFixedHeight(120);
     m_mapFallback->setStyleSheet(QStringLiteral("color:#8a97a5; border:1px dashed #2a3542;"));
@@ -81,6 +85,8 @@ StationManagePage::StationManagePage(ApiClient* api, QWidget* parent)
     connect(addBtn, &QPushButton::clicked, this, &StationManagePage::onAddStation);
     connect(detailBtn, &QPushButton::clicked, this, &StationManagePage::onShowDetail);
     connect(refreshBtn, &QPushButton::clicked, this, &StationManagePage::refresh);
+    connect(pauseBtn, &QPushButton::clicked, this, &StationManagePage::onPauseStation);
+    connect(resumeBtn, &QPushButton::clicked, this, &StationManagePage::onResumeStation);
     connect(m_table, &QTableWidget::itemSelectionChanged, this,
             [this]() {
         const int row = m_table->currentRow();
@@ -117,6 +123,11 @@ void StationManagePage::refresh() {
             m_table->setItem(i, 6, new QTableWidgetItem(
                 QString::number(s.value(QStringLiteral("online_rate")).toDouble(), 'f', 1)
                 + QStringLiteral("%")));
+            QString st = s.value(QStringLiteral("status")).toString();
+            bool frozen = (st == QStringLiteral("frozen"))
+                          || (st.isEmpty() && m_frozenStations.contains(s.value(QStringLiteral("id")).toInt()));
+            m_table->setItem(i, 7, new QTableWidgetItem(
+                frozen ? QStringLiteral("停用") : QStringLiteral("正常")));
         }
             updateStationMap(stations);
     });
@@ -175,6 +186,79 @@ void StationManagePage::onAddStation() {
     });
 }
 
+void StationManagePage::onPauseStation() {
+    const int row = m_table->currentRow();
+    if (row < 0) {
+        QMessageBox::information(this, QStringLiteral("提示"), QStringLiteral("请先选中一个充电站"));
+        return;
+    }
+    const int stationId = m_table->item(row, 0)->data(Qt::UserRole).toInt();
+    m_api->fetchChargers(stationId,
+                         [this, stationId](int code, const QString&, const QJsonObject& payload) {
+        if (code != proto::code::Ok) {
+            return;
+        }
+        const QJsonArray chargers = payload.value(QStringLiteral("chargers")).toArray();
+        QList<int> toPause;
+        int busy = 0;   // 在用/预约中的桩不能打断
+        for (const QJsonValue& cv : chargers) {
+            const QJsonObject c = cv.toObject();
+            const QString st = c.value(QStringLiteral("status")).toString();
+            if (st == QStringLiteral("charging") || st == QStringLiteral("reserved")) {
+                ++busy;
+            } else if (st == QStringLiteral("idle")) {
+                toPause.append(c.value(QStringLiteral("id")).toInt());
+            }
+            // fault / offline / rebooting：保持原样，不暂停
+        }
+        if (busy > 0) {
+            QMessageBox::warning(this, QStringLiteral("无法停用"),
+                                 QStringLiteral("该站有 %1 台桩正在充电/被预约，为避免中断，请先处理再停用。").arg(busy));
+            return;
+        }
+        m_pausedChargers.insert(stationId, toPause);
+        for (int cid : toPause) {
+            m_api->pauseCharger(cid, nullptr);
+        }
+        m_api->pauseStation(stationId, [this, stationId](int c2, const QString& message,
+                                                         const QJsonObject&) {
+            if (c2 == proto::code::Ok) {
+                m_frozenStations.insert(stationId);
+            }
+            QMessageBox::information(this, QStringLiteral("停用电站"),
+                                     c2 == proto::code::Ok
+                                         ? QStringLiteral("已停用：站内空闲桩已暂停，故障/离线桩保持原样")
+                                         : QStringLiteral("失败：%1").arg(message));
+            refresh();
+        });
+    });
+}
+
+void StationManagePage::onResumeStation() {
+    const int row = m_table->currentRow();
+    if (row < 0) {
+        QMessageBox::information(this, QStringLiteral("提示"), QStringLiteral("请先选中一个充电站"));
+        return;
+    }
+    const int stationId = m_table->item(row, 0)->data(Qt::UserRole).toInt();
+    // 只恢复“停用时由我们暂停的空闲桩”，故障/离线桩本来就没动，仍保持原样
+    const QList<int> toResume = m_pausedChargers.value(stationId);
+    m_pausedChargers.remove(stationId);
+    for (int cid : toResume) {
+        m_api->resumeCharger(cid, nullptr);
+    }
+    m_api->resumeStation(stationId, [this, stationId](int c2, const QString& message,
+                                                      const QJsonObject&) {
+        if (c2 == proto::code::Ok) {
+            m_frozenStations.remove(stationId);
+        }
+        QMessageBox::information(this, QStringLiteral("恢复电站"),
+                                 c2 == proto::code::Ok
+                                     ? QStringLiteral("恢复电站")
+                                     : QStringLiteral("失败：%1").arg(message));
+        refresh();
+    });
+}
 void StationManagePage::onShowDetail() {
     const int row = m_table->currentRow();
     if (row < 0) {
@@ -249,7 +333,9 @@ L.circleMarker([__LAT__, __LNG__], {radius: 9, color: '#ffffff', weight: 2, fill
         for (int i = 0; i < chargers.size(); ++i) {
             const QJsonObject c = chargers.at(i).toObject();
             const QString type = c.value(QStringLiteral("type")).toString();
-            table->setItem(i, 0, new QTableWidgetItem(c.value(QStringLiteral("code")).toString()));
+            auto* codeItem = new QTableWidgetItem(c.value(QStringLiteral("code")).toString());
+            codeItem->setData(Qt::UserRole, c.value(QStringLiteral("id")).toInt());
+            table->setItem(i, 0, codeItem);
             table->setItem(i, 1, new QTableWidgetItem(
                 type == QStringLiteral("fast") ? QStringLiteral("快充") : QStringLiteral("慢充")));
             table->setItem(i, 2, new QTableWidgetItem(
@@ -261,7 +347,19 @@ L.circleMarker([__LAT__, __LNG__], {radius: 9, color: '#ffffff', weight: 2, fill
                 QString::number(c.value(QStringLiteral("health_score")).toInt())));
         }
     });
+        int jumpId = 0;
+        connect(table, &QTableWidget::cellDoubleClicked, &dlg,
+                [&dlg, table, &jumpId](int r, int) {
+            if (r < 0 || r >= table->rowCount()) {
+                return;
+            }
+            jumpId = table->item(r, 0)->data(Qt::UserRole).toInt();
+            dlg.accept();
+        });
     dlg.exec();
+        if (jumpId > 0) {
+            emit openChargerRequested(jumpId);
+        }
 }
 
 void StationManagePage::selectRowByStationId(int stationId) {
@@ -313,22 +411,19 @@ void StationManagePage::updateStationMap(const QJsonArray& stations) {
 <body><div id="m"></div>
 <script>
 var STATIONS = [__DATA__];
-var map = L.map('m').fitWorld();
+var map = L.map('m');
 L.tileLayer('https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}', {subdomains:'1234', maxZoom:18}).addTo(map);
 var markers = {};
 var normalStyle = {radius:7, color:'#ffffff', weight:1, fillColor:'#4f9eff', fillOpacity:0.9};
 var selStyle    = {radius:9, color:'#ffffff', weight:2, fillColor:'#e63946', fillOpacity:1};
 STATIONS.forEach(function(s){
-  var mk = L.circleMarker([s.lat,s.lng], normalStyle).addTo(map)
-      .bindPopup('<b>'+s.name+'</b>');
+  var mk = L.circleMarker([s.lat,s.lng], normalStyle).addTo(map).bindPopup('<b>'+s.name+'</b>');
   mk.on('click', function(){ location.hash='#s'+s.id; });
   markers[s.id] = mk;
 });
 function selectStation(id){
   for(var k in markers){ markers[k].setStyle(normalStyle); }
   if(markers[id]){ markers[id].setStyle(selStyle); markers[id].openPopup(); }
-  var latlngs = STATIONS.map(function(s){return [s.lat,s.lng];});
-  if(latlngs.length){ map.fitBounds(L.latLngBounds(latlngs).pad(0.2)); }
 }
 if(STATIONS.length){ map.fitBounds(L.latLngBounds(STATIONS.map(function(s){return [s.lat,s.lng];})).pad(0.2)); }
 </script>

@@ -20,6 +20,9 @@ public:
     static QJsonObject toggleUserStatus(int userId, const QString& status);
     static QJsonObject deviceLogs(int chargerId);
     static QJsonObject healthRanks();
+    static QJsonObject stationPause(int stationId);
+    static QJsonObject stationResume(int stationId);
+    static QJsonObject chargerResume(int chargerId);
     static QJsonObject orderDailyStats();
     static QJsonObject stationRevenueShare();
 

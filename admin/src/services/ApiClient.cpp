@@ -119,6 +119,26 @@ void ApiClient::fetchStationRevenueShare(ResponseCb cb) {
     static const QString kType = QStringLiteral("admin.station_revenue_share");
     dispatch(kType, QJsonObject(), MockDataProvider::stationRevenueShare(), cb);
 }
+void ApiClient::pauseStation(int stationId, ResponseCb cb) {
+    QJsonObject payload;
+    payload.insert(QStringLiteral("station_id"), stationId);
+    static const QString kType = QStringLiteral("admin.station_pause");
+    dispatch(kType, payload, MockDataProvider::stationPause(stationId), cb);
+}
+
+void ApiClient::resumeStation(int stationId, ResponseCb cb) {
+    QJsonObject payload;
+    payload.insert(QStringLiteral("station_id"), stationId);
+    static const QString kType = QStringLiteral("admin.station_resume");
+    dispatch(kType, payload, MockDataProvider::stationResume(stationId), cb);
+}
+
+void ApiClient::resumeCharger(int chargerId, ResponseCb cb) {
+    QJsonObject payload;
+    payload.insert(QStringLiteral("charger_id"), chargerId);
+    static const QString kType = QStringLiteral("admin.charger_resume");
+    dispatch(kType, payload, MockDataProvider::chargerResume(chargerId), cb);
+}
 void ApiClient::fetchHealthRanks(ResponseCb cb) {
     dispatch(proto::type::kAdminFaultRisk, QJsonObject(), MockDataProvider::healthRanks(), cb);
 }
