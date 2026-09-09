@@ -28,7 +28,14 @@ std::optional<WorkOrderRow> createWorkOrder(int userId, const QString &type,
 // 我的工单(按时间倒序)。
 QList<WorkOrderRow> listWorkOrders(int userId);
 
+// 管理端工单列表。status 为空表示全部。
+QList<WorkOrderRow> listAllWorkOrders(const QString &status);
+
 // 单条工单(校验归属)。
 std::optional<WorkOrderRow> findWorkOrder(int userId, int workOrderId);
+
+// 管理端处理/回复工单。status 为空时默认 completed。
+std::optional<WorkOrderRow> handleWorkOrder(int workOrderId, const QString &handler,
+                                            const QString &status, const QString &result);
 
 }  // namespace dao

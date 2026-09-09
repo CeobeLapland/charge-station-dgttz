@@ -6,9 +6,15 @@
 ApiClient::ApiClient(QObject* parent)
     : QObject(parent) {
     connect(&m_connection, &ServerConnection::connected, this, [this]() {
+        m_adminAuthenticated = false;
+        if (!m_account.isEmpty() && !m_password.isEmpty()) {
+            authenticateCachedAdmin();
+            return;
+        }
         emit connectionStateChanged(true);
     });
     connect(&m_connection, &ServerConnection::disconnected, this, [this]() {
+        m_adminAuthenticated = false;
         emit connectionStateChanged(false);
     });
     connect(&m_connection, &ServerConnection::pushReceived, this, &ApiClient::pushReceived);
@@ -35,11 +41,28 @@ void ApiClient::dispatch(const QString& type, const QJsonObject& payload,
     m_connection.sendRequest(type, payload, cb);
 }
 
+void ApiClient::authenticateCachedAdmin() {
+    QJsonObject payload;
+    payload.insert(QStringLiteral("account"), m_account);
+    payload.insert(QStringLiteral("password"), m_password);
+    m_connection.sendRequest(proto::type::kAdminLogin, payload,
+                             [this](int code, const QString&, const QJsonObject&) {
+        m_adminAuthenticated = (code == proto::code::Ok);
+        emit connectionStateChanged(m_adminAuthenticated);
+    });
+}
+
 void ApiClient::login(const QString& account, const QString& password, ResponseCb cb) {
+    m_account = account;
+    m_password = password;
     QJsonObject payload;
     payload.insert(QStringLiteral("account"), account);
     payload.insert(QStringLiteral("password"), password);
-    dispatch(proto::type::kAdminLogin, payload, MockDataProvider::adminLogin(account, password), cb);
+    dispatch(proto::type::kAdminLogin, payload, MockDataProvider::adminLogin(account, password),
+             [this, cb](int code, const QString& message, const QJsonObject& payload) {
+        m_adminAuthenticated = (code == proto::code::Ok && m_connection.isConnected());
+        if (cb) cb(code, message, payload);
+    });
 }
 
 void ApiClient::fetchRevenue(int days, ResponseCb cb) {
@@ -92,9 +115,7 @@ void ApiClient::pauseCharger(int chargerId, ResponseCb cb) {
 }
 
 void ApiClient::addCharger(const QJsonObject& charger, ResponseCb cb) {
-    // 消息类型：admin.charger_add（组内 spec 待补，server 暂未实现；Mock 下可用）
-    static const QString kAdminChargerAdd = QStringLiteral("admin.charger_add");
-    dispatch(kAdminChargerAdd, charger, MockDataProvider::addCharger(charger), cb);
+    dispatch(proto::type::kAdminChargerAdd, charger, MockDataProvider::addCharger(charger), cb);
 }
 void ApiClient::toggleUserStatus(int userId, const QString& status, ResponseCb cb) {
     QJsonObject payload;
@@ -110,6 +131,24 @@ void ApiClient::fetchDeviceLogs(int chargerId, ResponseCb cb) {
     dispatch(proto::type::kAdminDeviceLog, payload, MockDataProvider::deviceLogs(chargerId), cb);
 }
 
+void ApiClient::fetchWorkOrders(const QString& status, ResponseCb cb) {
+    QJsonObject payload;
+    if (!status.isEmpty()) {
+        payload.insert(QStringLiteral("status"), status);
+    }
+    dispatch(proto::type::kAdminWorkOrderList, payload, MockDataProvider::workOrders(status), cb);
+}
+
+void ApiClient::handleWorkOrder(int workOrderId, const QString& status, const QString& result,
+                                ResponseCb cb) {
+    QJsonObject payload;
+    payload.insert(QStringLiteral("work_order_id"), workOrderId);
+    payload.insert(QStringLiteral("status"), status);
+    payload.insert(QStringLiteral("result"), result);
+    dispatch(proto::type::kAdminWorkOrderHandle, payload,
+             MockDataProvider::handleWorkOrder(workOrderId, status, result), cb);
+}
+
 void ApiClient::fetchOrderDailyStats(ResponseCb cb) {
     static const QString kType = QStringLiteral("admin.order_daily_stats");
     dispatch(kType, QJsonObject(), MockDataProvider::orderDailyStats(), cb);
@@ -122,22 +161,19 @@ void ApiClient::fetchStationRevenueShare(ResponseCb cb) {
 void ApiClient::pauseStation(int stationId, ResponseCb cb) {
     QJsonObject payload;
     payload.insert(QStringLiteral("station_id"), stationId);
-    static const QString kType = QStringLiteral("admin.station_pause");
-    dispatch(kType, payload, MockDataProvider::stationPause(stationId), cb);
+    dispatch(proto::type::kAdminStationPause, payload, MockDataProvider::stationPause(stationId), cb);
 }
 
 void ApiClient::resumeStation(int stationId, ResponseCb cb) {
     QJsonObject payload;
     payload.insert(QStringLiteral("station_id"), stationId);
-    static const QString kType = QStringLiteral("admin.station_resume");
-    dispatch(kType, payload, MockDataProvider::stationResume(stationId), cb);
+    dispatch(proto::type::kAdminStationResume, payload, MockDataProvider::stationResume(stationId), cb);
 }
 
 void ApiClient::resumeCharger(int chargerId, ResponseCb cb) {
     QJsonObject payload;
     payload.insert(QStringLiteral("charger_id"), chargerId);
-    static const QString kType = QStringLiteral("admin.charger_resume");
-    dispatch(kType, payload, MockDataProvider::chargerResume(chargerId), cb);
+    dispatch(proto::type::kAdminChargerResume, payload, MockDataProvider::chargerResume(chargerId), cb);
 }
 void ApiClient::fetchHealthRanks(ResponseCb cb) {
     dispatch(proto::type::kAdminFaultRisk, QJsonObject(), MockDataProvider::healthRanks(), cb);

@@ -115,6 +115,10 @@ int main(int argc, char *argv[]) {
         if (client.isConnected())
             client.sendMap(type, payload);
     });
+    chatData.setBackendSender([&client](const QString& type, const QVariantMap& payload) {
+        if (client.isConnected())
+            client.sendMap(type, payload);
+    });
 
     // 登录成功后批量拉取个人域数据（每类响应对应一条 apply* 回写）
     const auto pullUserData = [&client]() {
@@ -137,8 +141,11 @@ int main(int argc, char *argv[]) {
         // 服务端按距离返回其库内电站，覆盖本地种子 → 预约 station_id 才与服务端一致）
         client.send(QStringLiteral("station.nearby"),
                     QJsonObject{{"longitude", 116.40}, {"latitude", 39.90}});
-        // 自动登录：本地存了勾选「自动登录」的手机号 → 服务端免密登录
-        const QString acc = authStore.autoLoginAccount();
+        // 绑定服务端身份：当前已经在本地登录的账号优先；否则再用自动登录账号。
+        // 这样普通登录后遇到重连，也不会出现 WebSocket 在线但服务端不知道 user_id 的情况。
+        QString acc = authStore.currentAccount();
+        if (acc.isEmpty())
+            acc = authStore.autoLoginAccount();
         if (!acc.isEmpty())
             client.login(acc);
     });
@@ -167,7 +174,13 @@ int main(int argc, char *argv[]) {
 
         const auto obj = payload.toVariantMap();
 
-        if (type == QStringLiteral("user.login_resp")) {
+        if (type == QStringLiteral("push.notification")) {
+            const QVariantMap notification = obj.value(QStringLiteral("notification")).toMap();
+            if (notification.value(QStringLiteral("type")).toString() == QStringLiteral("work_order")) {
+                chatData.addServiceReply(notification.value(QStringLiteral("content")).toString());
+            }
+            client.send(QStringLiteral("notification.list"), QJsonObject());
+        } else if (type == QStringLiteral("user.login_resp")) {
             const QVariantMap user = obj.value(QStringLiteral("user")).toMap();
             if (!user.isEmpty()) {
                 userData.applyUser(user);

@@ -57,7 +57,7 @@ constexpr int    kPointsPerYuan   = 100;
 std::optional<OrderView> createOrder(int userId, int stationId, int chargerId, OpError *err);
 
 // 开始充电。startSoc < 0 时按车辆默认起始电量 20% 处理。
-std::optional<OrderView> startOrder(int userId, int orderId, double startSoc, OpError *err);
+std::optional<OrderView> startOrder(int userId, int orderId, double startSoc, double targetSoc, OpError *err);
 
 // 结束充电, 转 pending_settle 并算出电量/金额。
 // endSoc >= 0 时按 SOC 差算电量(演示/仿真用); endSoc < 0 时按实际时长 × 功率估算。

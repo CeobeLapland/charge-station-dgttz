@@ -5,7 +5,7 @@
 // ============================================================
 // ScreenDao — 数据大屏(只读)相关聚合查询
 // 对应协议消息 screen.snapshot。
-// 字段与口径见 screen/API_CONTRACT.md, 已在 spec-协议.md 定稿。
+// 字段与口径见 screen/SERVER_INTEGRATION_REQUIREMENTS.md, 已在 spec-协议.md 定稿。
 //
 // 统一口径(服务端唯一定义, 管理端/大屏都以此为准):
 //   today_*        = 今天 00:00:00 至此刻
@@ -20,6 +20,10 @@
 // ============================================================
 
 struct ScreenMetrics {
+    int    stationCount = 0;
+    int    chargerCount = 0;
+    int    onlineChargerCount = 0;
+    double todayEnergyKwh = 0;
     double todayRevenue = 0;
     int    todayOrders  = 0;
     int    chargingCount = 0;
@@ -46,6 +50,12 @@ struct UtilizationRow {
     int     stationId = 0;
     QString stationName;
     double  utilizationRate = 0;  // 0-100
+};
+
+struct StationEnergyRankRow {
+    int     stationId = 0;
+    QString stationName;
+    double  todayEnergyKwh = 0;
 };
 
 struct AlarmRow {
@@ -75,6 +85,7 @@ ScreenMetrics          screenMetrics();
 QList<ScreenStation>   screenStations();
 QList<LoadPoint>       loadSeriesActual(int hours);      // 近 hours 小时的实际负荷
 QList<UtilizationRow>  utilizationRank(int limit);
+QList<StationEnergyRankRow> stationEnergyRank(int limit);
 QList<AlarmRow>        recentAlarms(int limit);
 QList<UserGrowthPoint> userGrowth(int days);
 EnergyByLevel          energyByPriceLevel();             // 近7日(见 .cpp 注释)

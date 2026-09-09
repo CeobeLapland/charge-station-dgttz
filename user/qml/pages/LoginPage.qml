@@ -10,6 +10,7 @@ Item {
     // 标记为登录流程页：Main.qml 的 applyAuthView 用它判断「已回到登录页」，
     // 避免把设置页等非主页面误判成登录页。
     property bool isLoginPage: true
+    property bool pendingOnlineLogin: false
 
     // 在页面根节点缓存 StackView 引用：Dialog/Popup 打开时会被重挂到 Overlay，
     // 此时在弹窗回调里直接读 StackView.view 会得到 null，因此统一走这个缓存。
@@ -17,6 +18,19 @@ Item {
 
     // 连续输错密码计数：连续三次自动跳转找回密码
     property int failCount: 0
+
+    Connections {
+        target: backend
+        function onMessageReceived(type, code, message, payload) {
+            if (!root.pendingOnlineLogin || type !== "user.login_resp")
+                return
+            root.pendingOnlineLogin = false
+            if (code !== 0) {
+                errText.text = message.length > 0 ? message : qsTr("登录失败，请稍后重试")
+                errText.visible = true
+            }
+        }
+    }
 
     // 顶部右上角「切换账号」：打开本地账号列表，选中后回填账号/密码/勾选状态
     Text {
@@ -279,8 +293,9 @@ Item {
                 authStore.updateOptions(acc, rememberCb.checked, autoCb.checked)
             else
                 authStore.registerAccount(acc, pwd, rememberCb.checked, autoCb.checked)
+            pendingOnlineLogin = true
+            errText.visible = false
             backend.login(acc)
-            authStore.login(acc)
             return
         }
         // 离线降级：本地账号+密码校验（保留原示例逻辑）

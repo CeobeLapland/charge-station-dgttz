@@ -45,6 +45,16 @@ ScreenMetrics screenMetrics()
     ScreenMetrics m;
     const QString today = todayStr(), yest = yesterdayStr(), nowT = hhmmssNow();
 
+    m.stationCount = static_cast<int>(scalar(QStringLiteral("SELECT COUNT(*) FROM station")));
+    m.chargerCount = static_cast<int>(scalar(QStringLiteral("SELECT COUNT(*) FROM charger")));
+    m.onlineChargerCount = static_cast<int>(scalar(
+        QStringLiteral("SELECT COUNT(*) FROM charger WHERE status NOT IN ('offline','fault')")));
+
+    m.todayEnergyKwh = scalar(
+        QStringLiteral("SELECT IFNULL(ROUND(SUM(energy_kwh),2),0) FROM charging_order "
+                       "WHERE status='completed' AND substr(settle_time,1,10)=?"),
+        {today});
+
     m.todayRevenue = scalar(
         QStringLiteral("SELECT IFNULL(ROUND(SUM(pay_amount),2),0) FROM charging_order "
                        "WHERE status='completed' AND substr(settle_time,1,10)=?"),
@@ -155,6 +165,27 @@ QList<UtilizationRow> utilizationRank(int limit)
         return a.utilizationRate > b.utilizationRate;   // 降序
     });
     if (out.size() > limit) out = out.mid(0, limit);
+    return out;
+}
+
+QList<StationEnergyRankRow> stationEnergyRank(int limit)
+{
+    if (limit <= 0) limit = 10;
+    QList<StationEnergyRankRow> out;
+    QSqlQuery q;
+    q.prepare(QStringLiteral(
+        "SELECT s.id, s.name, IFNULL(ROUND(SUM(o.energy_kwh),2),0) AS energy "
+        "FROM station s LEFT JOIN charging_order o "
+        "  ON o.station_id=s.id AND o.status='completed' AND substr(o.settle_time,1,10)=? "
+        "GROUP BY s.id, s.name ORDER BY energy DESC, s.id LIMIT ?"));
+    q.addBindValue(todayStr());
+    q.addBindValue(limit);
+    if (!q.exec()) return out;
+    while (q.next()) {
+        out.append(StationEnergyRankRow{q.value(0).toInt(),
+                                        q.value(1).toString(),
+                                        q.value(2).toDouble()});
+    }
     return out;
 }
 

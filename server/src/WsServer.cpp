@@ -2,6 +2,7 @@
 
 #include "ChargeSimulator.h"
 
+#include <QDate>
 #include <QDateTime>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -161,7 +162,8 @@ void WsServer::sendToUser(int userId, const QString &type, const QJsonObject &pa
     for (auto it = m_clients.cbegin(); it != m_clients.cend(); ++it) {
         if (it.value().userId == userId) { it.key()->sendTextMessage(text); ++n; }
     }
-    Q_UNUSED(n);   // 用户不在线是正常情况(比如关了 App), 不用报错
+    qInfo().noquote() << QStringLiteral("[定向推送] %1 → user_id=%2 在线连接=%3")
+                             .arg(type).arg(userId).arg(n);
 }
 
 // ---------- 服务端主动推送: 群发给所有在线连接 ----------
@@ -249,6 +251,8 @@ QJsonObject WsServer::dispatch(QWebSocket *sock, const QString &type, const QJso
     if (type == QStringLiteral("admin.user_toggle_status")) return handleAdminUserToggleStatus(sock, payload, code, message);
     if (type == QStringLiteral("admin.device_log"))     return handleAdminDeviceLog(sock, payload, code, message);
     if (type == QStringLiteral("admin.fault_risk"))     return handleAdminFaultRisk(sock, payload, code, message);
+    if (type == QStringLiteral("admin.work_order_list")) return handleAdminWorkOrderList(sock, payload, code, message);
+    if (type == QStringLiteral("admin.work_order_handle")) return handleAdminWorkOrderHandle(sock, payload, code, message);
 
     // ---- 订单流程 ----
     if (type == QStringLiteral("order.create"))         return handleOrderCreate(sock, payload, code, message);
@@ -781,6 +785,9 @@ QJsonObject WsServer::handleScreenSnapshot(QWebSocket *, const QJsonObject &payl
     // --- metrics ---
     const auto m = dao::screenMetrics();
     const QJsonObject metrics{
+        {"station_count", m.stationCount}, {"charger_count", m.chargerCount},
+        {"online_charger_count", m.onlineChargerCount},
+        {"today_energy_kwh", m.todayEnergyKwh},
         {"today_revenue", m.todayRevenue}, {"today_orders", m.todayOrders},
         {"charging_count", m.chargingCount}, {"online_rate", m.onlineRate},
         {"revenue_change_pct", m.revenueChangePct},
@@ -801,6 +808,42 @@ QJsonObject WsServer::handleScreenSnapshot(QWebSocket *, const QJsonObject &payl
     QJsonArray actual;
     for (const auto &p : dao::loadSeriesActual(hours))
         actual.append(QJsonObject{{"timestamp", p.timestamp}, {"value_kw", p.valueKw}});
+
+    const auto status = dao::chargerStatusDistribution();
+    const QJsonObject statusDistribution{
+        {"idle", status.idle}, {"charging", status.charging},
+        {"offline", status.offline}, {"fault", status.fault},
+        {"reserved", status.reserved}, {"rebooting", status.rebooting},
+    };
+
+    const auto dailyStats = dao::orderDailyStats();
+    QHash<QString, DailyOrderStat> dailyByDate;
+    for (const auto &d : dailyStats)
+        dailyByDate.insert(d.date, d);
+
+    const int trendDays = days > 0 ? days : 7;
+    QJsonArray orderTrend;
+    QJsonArray energyRevenueTrend;
+    const auto revenue = dao::revenue(trendDays);
+    QHash<QString, double> revenueByDate;
+    for (const auto &r : revenue.trend)
+        revenueByDate.insert(r.date, r.amount);
+
+    const QDate today = QDate::currentDate();
+    for (int i = trendDays - 1; i >= 0; --i) {
+        const QString date = today.addDays(-i).toString(QStringLiteral("yyyy-MM-dd"));
+        const auto d = dailyByDate.value(date);
+        orderTrend.append(QJsonObject{{"date", date}, {"order_count", d.orderCount}});
+        energyRevenueTrend.append(QJsonObject{{"date", date},
+                                              {"energy_kwh", d.energyKwh},
+                                              {"revenue", revenueByDate.value(date, 0.0)}});
+    }
+
+    QJsonArray stationRank;
+    for (const auto &r : dao::stationEnergyRank(10))
+        stationRank.append(QJsonObject{{"station_id", r.stationId},
+                                       {"station_name", r.stationName},
+                                       {"today_energy_kwh", r.todayEnergyKwh}});
 
     // --- utilization_rank ---
     QJsonArray util;
@@ -839,6 +882,10 @@ QJsonObject WsServer::handleScreenSnapshot(QWebSocket *, const QJsonObject &payl
 
     return QJsonObject{
         {"metrics", metrics},
+        {"status_distribution", statusDistribution},
+        {"order_trend", orderTrend},
+        {"energy_revenue_trend", energyRevenueTrend},
+        {"station_rank", stationRank},
         {"stations", stations},
         {"load_series", QJsonObject{{"actual", actual}, {"forecast", QJsonArray{}}}},
         {"utilization_rank", util},
@@ -853,7 +900,7 @@ QJsonObject WsServer::handleScreenSnapshot(QWebSocket *, const QJsonObject &payl
 // ---------- ml.forecast: 机器学习模块尚未接入 ----------
 QJsonObject WsServer::handleMlForecast(QWebSocket *, const QJsonObject &, int &code, QString &message)
 {
-    // 按 API_CONTRACT 第 9 节: 5001 = 预测/模型不可用, 大屏保留实际曲线并显示"预测不可用"
+    // 5001 = 预测/模型不可用, 大屏保留实际曲线并显示"预测不可用"
     code = 5001;
     message = QStringLiteral("负荷预测模块尚未接入, 请先使用 load_series.actual");
     return {};
@@ -921,9 +968,11 @@ QJsonObject WsServer::handleOrderStart(QWebSocket *sock, const QJsonObject &payl
     const int    orderId  = payload.value(QStringLiteral("order_id")).toInt();
     const double startSoc = payload.contains(QStringLiteral("start_soc"))
                                 ? payload.value(QStringLiteral("start_soc")).toDouble() : -1.0;
+    const double targetSoc = payload.contains(QStringLiteral("target_soc"))
+                                ? payload.value(QStringLiteral("target_soc")).toDouble() : 100.0;
 
     OpError err;
-    const auto o = dao::startOrder(userIdOf(sock), orderId, startSoc, &err);
+    const auto o = dao::startOrder(userIdOf(sock), orderId, startSoc, targetSoc, &err);
     if (!o) { code = err.code; message = err.message; return {}; }
 
     // ★ 交给仿真线程: 之后 SOC/电量/费用由工作线程每秒推进, 主线程只管推送和写库
@@ -1218,6 +1267,62 @@ Vehicle vehicleFromJson(const QJsonObject &p, int userId)
 }
 
 }  // namespace
+
+// ---------- admin.work_order_*: 客服工单 ----------
+QJsonObject WsServer::handleAdminWorkOrderList(QWebSocket *sock, const QJsonObject &payload,
+                                               int &code, QString &message)
+{
+    if (!requireAdmin(sock, code, message)) return {};
+    QJsonArray arr;
+    const QString status = payload.value(QStringLiteral("status")).toString();
+    for (const auto &w : dao::listAllWorkOrders(status))
+        arr.append(workOrderToJson(w));
+    return QJsonObject{{"work_orders", arr}};
+}
+
+QJsonObject WsServer::handleAdminWorkOrderHandle(QWebSocket *sock, const QJsonObject &payload,
+                                                 int &code, QString &message)
+{
+    if (!requireAdmin(sock, code, message)) return {};
+    const int workOrderId = payload.value(QStringLiteral("work_order_id")).toInt();
+    const QString result = payload.value(QStringLiteral("result")).toString().trimmed();
+    const QString status = payload.value(QStringLiteral("status")).toString(QStringLiteral("completed"));
+    if (workOrderId <= 0 || result.isEmpty()) {
+        code = 9001;
+        message = QStringLiteral("请选择工单并填写回复内容");
+        return {};
+    }
+
+    const auto w = dao::handleWorkOrder(workOrderId, adminAccountOf(sock), status, result);
+    if (!w) {
+        code = 4001;
+        message = QStringLiteral("工单不存在: id=%1").arg(workOrderId);
+        return {};
+    }
+
+    int notificationId = 0;
+    if (w->userId > 0) {
+        notificationId = dao::pushNotification(
+            w->userId, QStringLiteral("work_order"), QStringLiteral("客服回复"),
+            result, w->id);
+        QJsonObject notification{
+            {"id", notificationId},
+            {"user_id", w->userId},
+            {"type", QStringLiteral("work_order")},
+            {"title", QStringLiteral("客服回复")},
+            {"content", result},
+            {"related_id", w->id},
+            {"is_read", 0},
+            {"create_time", QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"))},
+        };
+        sendToUser(w->userId, QStringLiteral("push.notification"),
+                   QJsonObject{{"notification", notification}, {"work_order", workOrderToJson(*w)}});
+    }
+
+    broadcast(QStringLiteral("push.work_order"), QJsonObject{{"work_order", workOrderToJson(*w)}});
+    message = QStringLiteral("回复已发送");
+    return QJsonObject{{"work_order", workOrderToJson(*w)}, {"notification_id", notificationId}};
+}
 
 // ---------- user.update_profile ----------
 QJsonObject WsServer::handleUserUpdateProfile(QWebSocket *sock, const QJsonObject &payload,

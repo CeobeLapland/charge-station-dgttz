@@ -55,6 +55,25 @@ QString normalizeType(const QString &t)
     return kTypes.contains(t) ? t : QStringLiteral("user_complaint");
 }
 
+QString normalizeStatus(const QString &s)
+{
+    static const QStringList kStatuses{
+        QStringLiteral("pending"), QStringLiteral("processing"),
+        QStringLiteral("completed"), QStringLiteral("closed")};
+    if (s.trimmed().isEmpty())
+        return QStringLiteral("completed");
+    return kStatuses.contains(s) ? s : QStringLiteral("completed");
+}
+
+std::optional<WorkOrderRow> findWorkOrderAny(int workOrderId)
+{
+    QSqlQuery q;
+    q.prepare(QString::fromLatin1(kSelectWorkOrder) + QStringLiteral("WHERE w.id=?"));
+    q.addBindValue(workOrderId);
+    if (!q.exec() || !q.next()) return std::nullopt;
+    return rowToWorkOrder(q);
+}
+
 }  // namespace
 
 namespace dao {
@@ -97,6 +116,26 @@ QList<WorkOrderRow> listWorkOrders(int userId)
     return out;
 }
 
+QList<WorkOrderRow> listAllWorkOrders(const QString &status)
+{
+    QList<WorkOrderRow> out;
+    QSqlQuery q;
+    const QString s = status.trimmed();
+    if (s.isEmpty()) {
+        q.prepare(QString::fromLatin1(kSelectWorkOrder)
+                  + QStringLiteral("ORDER BY CASE w.status "
+                                   "WHEN 'pending' THEN 0 WHEN 'processing' THEN 1 "
+                                   "WHEN 'completed' THEN 2 ELSE 3 END, w.id DESC"));
+    } else {
+        q.prepare(QString::fromLatin1(kSelectWorkOrder)
+                  + QStringLiteral("WHERE w.status=? ORDER BY w.id DESC"));
+        q.addBindValue(normalizeStatus(s));
+    }
+    if (!q.exec()) return out;
+    while (q.next()) out.append(rowToWorkOrder(q));
+    return out;
+}
+
 std::optional<WorkOrderRow> findWorkOrder(int userId, int workOrderId)
 {
     QSqlQuery q;
@@ -106,6 +145,26 @@ std::optional<WorkOrderRow> findWorkOrder(int userId, int workOrderId)
     const WorkOrderRow w = rowToWorkOrder(q);
     if (w.userId != userId) return std::nullopt;    // 不是你的工单 → 当作不存在
     return w;
+}
+
+std::optional<WorkOrderRow> handleWorkOrder(int workOrderId, const QString &handler,
+                                            const QString &status, const QString &result)
+{
+    if (workOrderId <= 0)
+        return std::nullopt;
+
+    const QString nextStatus = normalizeStatus(status);
+    QSqlQuery q;
+    q.prepare(QStringLiteral(
+        "UPDATE work_order SET status=?, handler=?, result=?, handle_time=? WHERE id=?"));
+    q.addBindValue(nextStatus);
+    q.addBindValue(nz(handler));
+    q.addBindValue(nz(result));
+    q.addBindValue(nowStr());
+    q.addBindValue(workOrderId);
+    if (!q.exec() || q.numRowsAffected() <= 0)
+        return std::nullopt;
+    return findWorkOrderAny(workOrderId);
 }
 
 }  // namespace dao
