@@ -30,3 +30,4 @@ private:
     static QJsonObject okPayload(const QJsonObject& payload);
     static QJsonObject errPayload(int code, const QString& message);
 };
+

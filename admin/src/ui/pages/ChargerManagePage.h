@@ -24,3 +24,4 @@ private:
     QTableWidget* m_table = nullptr;
     QTextEdit* m_logView = nullptr;
 };
+

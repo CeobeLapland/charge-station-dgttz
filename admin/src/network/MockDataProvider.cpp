@@ -39,7 +39,6 @@ QJsonArray& stationCache() {
             s.insert(QStringLiteral("latitude"), 39.90 + i * 0.02);
             s.insert(QStringLiteral("total_chargers"), 8 + (i % 3) * 2);
             s.insert(QStringLiteral("online_rate"), 82.0 + i * 3.5);
-            // ---- 以下字段对齐 server/sql/schema.sql 的 station 表 ----
             s.insert(QStringLiteral("area"),
                      QStringList{QStringLiteral("高新区"), QStringLiteral("市中心"),
                                  QStringLiteral("软件园"), QStringLiteral("机场"),
@@ -99,7 +98,6 @@ QJsonArray& chargerCache() {
                 c.insert(QStringLiteral("health_score"), qMax(45, 100 - (id % 40)));
                 c.insert(QStringLiteral("total_charge_count"), (id * 37) % 500);
                 c.insert(QStringLiteral("total_charge_duration"), (id * 53) % 8000);
-                // ---- 实时电气参数/故障码，对齐 server/sql/schema.sql 的 charger 表 ----
                 double voltage = 0.0, current = 0.0;
                 if (status == QStringLiteral("charging")) {
                     voltage = fast ? 500.0 + (id % 10) * 10.0 : 220.0;
@@ -570,3 +568,4 @@ QJsonObject MockDataProvider::healthRanks() {
     payload.insert(QStringLiteral("risks"), ranks);
     return okPayload(payload);
 }
+

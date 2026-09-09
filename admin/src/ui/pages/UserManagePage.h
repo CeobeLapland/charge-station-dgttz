@@ -19,3 +19,4 @@ private:
     QTableWidget* m_table = nullptr;
     QLineEdit* m_searchEdit = nullptr;
 };
+

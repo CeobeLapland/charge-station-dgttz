@@ -39,3 +39,4 @@ private:
     UserManagePage* m_userManagePage = nullptr;
     DecisionPage* m_decisionPage = nullptr;
 };
+

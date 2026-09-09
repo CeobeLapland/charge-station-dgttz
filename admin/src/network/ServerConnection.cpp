@@ -119,3 +119,4 @@ void ServerConnection::sendHeartbeat() {
     m_socket.sendTextMessage(
         QString::fromUtf8(QJsonDocument(ping).toJson(QJsonDocument::Compact)));
 }
+

@@ -19,3 +19,4 @@ private:
     QLineEdit* m_questionEdit = nullptr;
     QPlainTextEdit* m_outputView = nullptr;
 };
+

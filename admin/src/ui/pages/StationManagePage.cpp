@@ -329,3 +329,4 @@ L.circleMarker([__LAT__, __LNG__], {radius: 9, color: '#ffffff', weight: 2, fill
             emit openChargerRequested(jumpId);
         }
 }
+

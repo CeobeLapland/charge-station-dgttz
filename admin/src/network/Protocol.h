@@ -1,9 +1,7 @@
 #pragma once
-// =====================================================================
 // 协议草稿（admin 本地暂存版）
 // 权威定义：docs/content/spec-协议.md；common/ 定稿后迁移到 common/ 统一引用。
 // 新增/修改消息必须先改 spec-协议.md，再通知全组，禁止只改一处。
-// =====================================================================
 #include <QString>
 
 namespace proto {
@@ -21,7 +19,6 @@ namespace type {
 const QString kSystemPing = QStringLiteral("system.ping");
 const QString kSystemPong = QStringLiteral("system.pong");
 
-// ---- 管理端 ----
 const QString kAdminLogin          = QStringLiteral("admin.login");
 const QString kAdminLoginResp      = QStringLiteral("admin.login_resp");
 const QString kAdminRevenue        = QStringLiteral("admin.revenue");
@@ -71,7 +68,6 @@ const QString kAdminWhatifResp     = QStringLiteral("admin.whatif_resp");
 const QString kAdminAssistantQuery = QStringLiteral("admin.assistant_query");
 const QString kAdminAssistantQueryResp = QStringLiteral("admin.assistant_query_resp");
 
-// ---- 服务端推送（订阅广播）----
 const QString kPushChargerStatus   = QStringLiteral("push.charger_status");
 const QString kPushOrderProgress   = QStringLiteral("push.order_progress");
 const QString kPushAlarm           = QStringLiteral("push.alarm");
@@ -110,3 +106,4 @@ enum ErrorCode {
 }  // namespace code
 
 }  // namespace proto
+

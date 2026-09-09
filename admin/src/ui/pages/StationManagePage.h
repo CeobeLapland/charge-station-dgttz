@@ -26,3 +26,4 @@ private:
     QSet<int> m_frozenStations;
     QHash<int, QList<int>> m_pausedChargers;
 };
+

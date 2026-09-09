@@ -50,3 +50,4 @@ private:
 
     ServerConnection m_connection;
 };
+

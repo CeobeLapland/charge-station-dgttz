@@ -41,3 +41,4 @@ private:
     QTimer m_reconnectTimer;
     QHash<int, ResponseCb> m_pending;
 };
+

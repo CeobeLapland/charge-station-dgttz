@@ -142,3 +142,4 @@ void ApiClient::resumeCharger(int chargerId, ResponseCb cb) {
 void ApiClient::fetchHealthRanks(ResponseCb cb) {
     dispatch(proto::type::kAdminFaultRisk, QJsonObject(), MockDataProvider::healthRanks(), cb);
 }
+

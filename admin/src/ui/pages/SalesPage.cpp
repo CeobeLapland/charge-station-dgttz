@@ -87,7 +87,6 @@ SalesPage::SalesPage(ApiClient* api, QWidget* parent)
     metricRow->addWidget(makeMetric(QStringLiteral("本月营收"), m_monthLabel));
     metricRow->addWidget(makeMetric(QStringLiteral("总营收"), m_totalLabel));
 
-    // ============ 折线 ============
     auto* lineChart = new QChart;
     lineChart->setTitle(QStringLiteral("营收趋势"));
     lineChart->setAnimationOptions(QChart::AllAnimations);
@@ -137,7 +136,6 @@ SalesPage::SalesPage(ApiClient* api, QWidget* parent)
                         .arg(m_dayDates.at(idx), money(m_dayAmounts.at(idx))));
     });
 
-    // ============ 柱状（合并双轴） ============
     auto* barChart = new QChart;
     barChart->setTitle(QStringLiteral("每日充电量与订单量"));
     barChart->setAnimationOptions(QChart::AllAnimations);
@@ -165,7 +163,6 @@ SalesPage::SalesPage(ApiClient* api, QWidget* parent)
     m_barView = new QChartView(barChart);
     m_barView->setRenderHint(QPainter::Antialiasing);
 
-    // ============ 饼图 ============
     auto* pieChart = new QChart;
     pieChart->setTitle(QStringLiteral("站点营收占比"));
     pieChart->setAnimationOptions(QChart::AllAnimations);
@@ -258,7 +255,6 @@ void SalesPage::refresh(int days) {
         m_dayEnergies = energyVals;
         m_dayOrders = orderVals;
 
-        // ---- 折线 ----
         m_lineSeries->clear();
         m_scatterSeries->clear();
         double maxAmount = 1.0, rangeSum = 0.0;
@@ -271,7 +267,6 @@ void SalesPage::refresh(int days) {
         m_lineAxisX->setCategories(categories);
         m_lineAxisY->setRange(0, maxAmount * 1.2);
 
-        // ---- 柱状（悬停该柱放大 10%，移开还原）----
         dropBarSets(m_energySeries);
         dropBarSets(m_ordersSeries);
         m_energySet = addBarSet(m_energySeries, QStringLiteral("充电量(kWh)"),
@@ -318,7 +313,6 @@ void SalesPage::refresh(int days) {
 
         updateMetrics(payload, days, rangeSum);
 
-        // ---- 饼图 ----
         while (!m_pieSeries->isEmpty()) {
             m_pieSeries->remove(m_pieSeries->slices().first());
         }

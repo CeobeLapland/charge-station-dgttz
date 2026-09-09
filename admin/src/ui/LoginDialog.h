@@ -23,3 +23,4 @@ private:
     QLabel* m_errorLabel = nullptr;
     QPushButton* m_loginButton = nullptr;
 };
+

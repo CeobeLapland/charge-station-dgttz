@@ -25,7 +25,6 @@ MainWindow::MainWindow(ApiClient* api, const QString& account, QWidget* parent)
     rootLayout->setContentsMargins(0, 0, 0, 0);
     rootLayout->setSpacing(0);
 
-    // ===== 左侧导航 =====
     m_navList = new QListWidget;
     m_navList->setObjectName(QStringLiteral("navList"));
     m_navList->setFixedWidth(200);
@@ -36,7 +35,6 @@ MainWindow::MainWindow(ApiClient* api, const QString& account, QWidget* parent)
     m_navList->addItem(QStringLiteral("用户管理"));
     m_navList->addItem(QStringLiteral("运营决策"));
 
-    // ===== 右侧 =====
     auto* right = new QWidget;
     auto* rightLayout = new QVBoxLayout(right);
     rightLayout->setContentsMargins(0, 0, 0, 0);
@@ -133,3 +131,4 @@ void MainWindow::onLogout() {
 void MainWindow::onAiAssistant() {
     m_navList->setCurrentRow(6);  // 跳转到运营决策页
 }
+
