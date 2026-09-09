@@ -5,6 +5,7 @@ class QLabel;
 class QListWidget;
 class QPushButton;
 class QStackedWidget;
+class AlarmCenterPage;
 class ApiClient;
 class ChargerManagePage;
 class ChargerStatusPage;
@@ -32,6 +33,7 @@ private:
     QStackedWidget* m_pages = nullptr;
     QLabel* m_statusLabel = nullptr;
 
+    AlarmCenterPage* m_alarmPage = nullptr;
     SalesPage* m_salesPage = nullptr;
     ChargerStatusPage* m_chargerStatusPage = nullptr;
     ChargerManagePage* m_chargerManagePage = nullptr;

@@ -22,6 +22,11 @@
 #ifdef HAS_WEBENGINE
 #include <QtWebEngineWidgets/QWebEngineView>
 #endif
+
+#ifdef HAS_WEBENGINE
+#include <QtWebEngineCore/QWebEnginePage>
+#include <QtWebEngineWidgets/QWebEngineView>
+#endif
 #include "services/ApiClient.h"
 
 StationManagePage::StationManagePage(ApiClient* api, QWidget* parent)
@@ -56,13 +61,39 @@ StationManagePage::StationManagePage(ApiClient* api, QWidget* parent)
 
     auto* layout = new QVBoxLayout(this);
     layout->addLayout(topRow);
-    layout->addWidget(m_table);
+#ifdef HAS_WEBENGINE
+    m_mapView = new QWebEngineView(this);
+    m_mapView->setFixedHeight(250);
+    layout->addWidget(m_mapView);
+    connect(m_mapView->page(), &QWebEnginePage::urlChanged, this,
+            [this](const QUrl& url) {
+        const QString frag = url.fragment();
+        if (frag.startsWith(QLatin1String("s"))) {
+            selectRowByStationId(frag.mid(1).toInt());
+        }
+    });
+#else
+    m_mapFallback = new QLabel(QStringLiteral(
+        "电站地图需在 Linux + QWebEngine 环境显示"), this);
+    m_mapFallback->setAlignment(Qt::AlignCenter);
+    m_mapFallback->setFixedHeight(120);
+    m_mapFallback->setStyleSheet(QStringLiteral("color:#8a97a5; border:1px dashed #2a3542;"));
+    layout->addWidget(m_mapFallback);
+#endif
+    layout->addWidget(m_table, 1);
 
     connect(addBtn, &QPushButton::clicked, this, &StationManagePage::onAddStation);
     connect(detailBtn, &QPushButton::clicked, this, &StationManagePage::onShowDetail);
     connect(refreshBtn, &QPushButton::clicked, this, &StationManagePage::refresh);
     connect(pauseBtn, &QPushButton::clicked, this, &StationManagePage::onPauseStation);
     connect(resumeBtn, &QPushButton::clicked, this, &StationManagePage::onResumeStation);
+    connect(m_table, &QTableWidget::itemSelectionChanged, this,
+            [this]() {
+        const int row = m_table->currentRow();
+        if (row >= 0) {
+            selectStationOnMap(m_table->item(row, 0)->data(Qt::UserRole).toInt());
+        }
+    });
     connect(m_table, &QTableWidget::cellDoubleClicked,
             this, [this](int, int) { onShowDetail(); });
 
@@ -98,6 +129,7 @@ void StationManagePage::refresh() {
             m_table->setItem(i, 7, new QTableWidgetItem(
                 frozen ? QStringLiteral("停用") : QStringLiteral("正常")));
         }
+            updateStationMap(stations);
     });
 }
 
@@ -328,4 +360,79 @@ L.circleMarker([__LAT__, __LNG__], {radius: 9, color: '#ffffff', weight: 2, fill
         if (jumpId > 0) {
             emit openChargerRequested(jumpId);
         }
+}
+
+void StationManagePage::selectRowByStationId(int stationId) {
+    for (int row = 0; row < m_table->rowCount(); ++row) {
+        if (m_table->item(row, 0)->data(Qt::UserRole).toInt() == stationId) {
+            m_table->selectRow(row);
+            m_table->scrollToItem(m_table->item(row, 0));
+            return;
+        }
+    }
+}
+
+void StationManagePage::selectStationOnMap(int stationId) {
+#ifdef HAS_WEBENGINE
+    if (m_mapView) {
+        m_mapView->page()->runJavaScript(
+            QStringLiteral("selectStation(%1);").arg(stationId));
+    }
+#else
+    Q_UNUSED(stationId);
+#endif
+}
+
+void StationManagePage::updateStationMap(const QJsonArray& stations) {
+#ifdef HAS_WEBENGINE
+    if (!m_mapView) {
+        return;
+    }
+    QStringList jsStations;
+    for (const QJsonValue& sv : stations) {
+        const QJsonObject s = sv.toObject();
+        const QString name = s.value(QStringLiteral("name")).toString();
+        const double lng = s.value(QStringLiteral("longitude")).toDouble();
+        const double lat = s.value(QStringLiteral("latitude")).toDouble();
+        const int id = s.value(QStringLiteral("id")).toInt();
+        QString safe = name;
+        safe.replace(QLatin1Char('\\'), QLatin1String("\\\\"))
+            .replace(QLatin1Char('\''), QLatin1String("\\'"));
+        jsStations << QStringLiteral("{id:%1,name:'%2',lat:%3,lng:%4}")
+                          .arg(id).arg(safe).arg(lat, 0, 'f', 6).arg(lng, 0, 'f', 6);
+    }
+    const QString html = QStringLiteral(R"(
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<link rel="stylesheet" href="leaflet.css">
+<script src="leaflet.js"></script>
+<style>html,body,#m{height:100%;margin:0;background:#dde8f0;}</style>
+</head>
+<body><div id="m"></div>
+<script>
+var STATIONS = [__DATA__];
+var map = L.map('m');
+L.tileLayer('https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}', {subdomains:'1234', maxZoom:18}).addTo(map);
+var markers = {};
+var normalStyle = {radius:7, color:'#ffffff', weight:1, fillColor:'#4f9eff', fillOpacity:0.9};
+var selStyle    = {radius:9, color:'#ffffff', weight:2, fillColor:'#e63946', fillOpacity:1};
+STATIONS.forEach(function(s){
+  var mk = L.circleMarker([s.lat,s.lng], normalStyle).addTo(map).bindPopup('<b>'+s.name+'</b>');
+  mk.on('click', function(){ location.hash='#s'+s.id; });
+  markers[s.id] = mk;
+});
+function selectStation(id){
+  for(var k in markers){ markers[k].setStyle(normalStyle); }
+  if(markers[id]){ markers[id].setStyle(selStyle); markers[id].openPopup(); }
+}
+if(STATIONS.length){ map.fitBounds(L.latLngBounds(STATIONS.map(function(s){return [s.lat,s.lng];})).pad(0.2)); }
+</script>
+</body></html>
+)");
+    QString page = html;
+    page.replace(QStringLiteral("__DATA__"), jsStations.join(QLatin1Char(',')));
+    m_mapView->setHtml(page, QUrl(QStringLiteral("qrc:/map/")));
+#else
+    Q_UNUSED(stations);
+#endif
 }
