@@ -26,3 +26,4 @@ private:
     QChartView* m_pieView = nullptr;
     QLabel* m_tip = nullptr;
 };
+

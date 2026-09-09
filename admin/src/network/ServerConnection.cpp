@@ -120,3 +120,4 @@ void ServerConnection::sendHeartbeat() {
         QString::fromUtf8(QJsonDocument(ping).toJson(QJsonDocument::Compact)));
 }
 
+

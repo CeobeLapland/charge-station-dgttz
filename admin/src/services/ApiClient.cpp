@@ -143,3 +143,4 @@ void ApiClient::fetchHealthRanks(ResponseCb cb) {
     dispatch(proto::type::kAdminFaultRisk, QJsonObject(), MockDataProvider::healthRanks(), cb);
 }
 
+

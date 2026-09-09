@@ -277,3 +277,4 @@ void ChargerManagePage::onAddCharger() {
         });
     });
 }
+

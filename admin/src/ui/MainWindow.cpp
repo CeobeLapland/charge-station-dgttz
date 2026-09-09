@@ -9,6 +9,7 @@
 
 #include "services/ApiClient.h"
 #include "ui/pages/ChargerManagePage.h"
+#include "ui/pages/AlarmCenterPage.h"
 #include "ui/pages/ChargerStatusPage.h"
 #include "ui/pages/DecisionPage.h"
 #include "ui/pages/SalesPage.h"
@@ -33,6 +34,7 @@ MainWindow::MainWindow(ApiClient* api, const QString& account, QWidget* parent)
     m_navList->addItem(QStringLiteral("充电桩管理"));
     m_navList->addItem(QStringLiteral("充电站管理"));
     m_navList->addItem(QStringLiteral("用户管理"));
+    m_navList->addItem(QStringLiteral("告警中心"));
     m_navList->addItem(QStringLiteral("运营决策"));
 
     auto* right = new QWidget;
@@ -61,12 +63,14 @@ MainWindow::MainWindow(ApiClient* api, const QString& account, QWidget* parent)
     m_chargerManagePage = new ChargerManagePage(m_api);
     m_stationManagePage = new StationManagePage(m_api);
     m_userManagePage = new UserManagePage(m_api);
+    m_alarmPage = new AlarmCenterPage(m_api);
     m_decisionPage = new DecisionPage(m_api);
     m_pages->addWidget(m_salesPage);
     m_pages->addWidget(m_chargerStatusPage);
     m_pages->addWidget(m_chargerManagePage);
     m_pages->addWidget(m_stationManagePage);
     m_pages->addWidget(m_userManagePage);
+    m_pages->addWidget(m_alarmPage);
     m_pages->addWidget(m_decisionPage);
 
     // 底部状态栏
@@ -131,4 +135,5 @@ void MainWindow::onLogout() {
 void MainWindow::onAiAssistant() {
     m_navList->setCurrentRow(6);  // 跳转到运营决策页
 }
+
 

@@ -20,3 +20,4 @@ private:
     QLineEdit* m_searchEdit = nullptr;
 };
 
+

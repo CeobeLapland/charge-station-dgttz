@@ -72,3 +72,4 @@ private:
     QHash<QString, double> m_energyByDate;
     QList<QPair<QString, double>> m_stationRows;
 };
+

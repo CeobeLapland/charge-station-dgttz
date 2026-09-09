@@ -25,3 +25,4 @@ private:
     QTextEdit* m_logView = nullptr;
 };
 
+

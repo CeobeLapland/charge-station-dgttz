@@ -259,3 +259,4 @@ void ChargerStatusPage::showStatusChargers(const QString& statusKey, const QStri
         }
     });
 }
+

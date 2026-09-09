@@ -569,3 +569,4 @@ QJsonObject MockDataProvider::healthRanks() {
     return okPayload(payload);
 }
 
+
