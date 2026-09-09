@@ -31,6 +31,8 @@ public:
     void addCharger(const QJsonObject& charger, ResponseCb cb);
     void toggleUserStatus(int userId, const QString& status, ResponseCb cb);
     void fetchDeviceLogs(int chargerId, ResponseCb cb);
+    void fetchWorkOrders(const QString& status, ResponseCb cb);
+    void handleWorkOrder(int workOrderId, const QString& status, const QString& result, ResponseCb cb);
 
     // 增强模块（占位）
     void fetchHealthRanks(ResponseCb cb);
@@ -45,8 +47,12 @@ signals:
     void pushReceived(const QJsonObject& message);
 
 private:
+    void authenticateCachedAdmin();
     void dispatch(const QString& type, const QJsonObject& payload,
                   const QJsonObject& mockResult, ResponseCb cb);
 
     ServerConnection m_connection;
+    QString m_account;
+    QString m_password;
+    bool m_adminAuthenticated = false;
 };

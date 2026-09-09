@@ -18,6 +18,7 @@ Item {
     id: root
     readonly property var stackView: StackView.view
     signal requestClose()
+    signal requestNavigation(real fromLng, real fromLat, real toLng, real toLat, string toName)
 
     // —— 数据与常量 ——
     property var allStns: ExploreData.stations()          // 全部电站（坐标即充电候选点）
@@ -61,8 +62,40 @@ Item {
     property string riskHint: ""
     property string status: ""      // 顶部/结果提示
 
-    // 经停列表（下标对应的 ComboBox，-1 表示未选择）
-    property var wayChosen: [ -1 ]
+    // 经停列表（下标对应的 ComboBox，0 表示“请选择…”）
+    property var wayChosen: [ 0 ]
+    function waypointIndexAt(i) {
+        if (i < 0 || i >= wayChosen.length)
+            return 0
+        var value = Number(wayChosen[i])
+        if (!isFinite(value) || value < 0 || value >= placeNames.length)
+            return 0
+        return value
+    }
+    function setWaypointIndex(i, value) {
+        if (i < 0 || i >= wayChosen.length)
+            return
+        var next = wayChosen.slice()
+        next[i] = value
+        wayChosen = next
+        clearResult()
+    }
+    function addWaypoint() {
+        var next = wayChosen.slice()
+        next.push(0)
+        wayChosen = next
+        clearResult()
+    }
+    function removeWaypoint(i) {
+        if (i < 0 || i >= wayChosen.length)
+            return
+        var next = wayChosen.slice()
+        next.splice(i, 1)
+        if (next.length === 0)
+            next.push(0)
+        wayChosen = next
+        clearResult()
+    }
 
     // —— 工具函数 ——
     function km(lng1, lat1, lng2, lat2) {
@@ -173,6 +206,20 @@ Item {
         var t = 0
         for (var i = 0; i < arr.length; i++) if (arr[i].dist) t += arr[i].dist
         return t
+    }
+    function navDestination() {
+        if (mapIds.length > 0) {
+            for (var i = allStns.length - 1; i >= 0; i--) {
+                if (Number(allStns[i].id) === Number(mapIds[mapIds.length - 1]))
+                    return {
+                        lng: Number(allStns[i].longitude),
+                        lat: Number(allStns[i].latitude),
+                        name: allStns[i].name || qsTr("充电站")
+                    }
+            }
+        }
+        var dest = placeAt(destCombo.currentIndex)
+        return dest ? { lng: Number(dest.lng), lat: Number(dest.lat), name: dest.name || qsTr("目的地") } : null
     }
 
     // —— 地图（复用探索页 MapLibre） ——
@@ -291,26 +338,25 @@ Item {
                     Column {
                         width: parent.width; spacing: 8
                         Repeater {
-                            model: root.wayChosen
+                            model: root.wayChosen.length
                             delegate: RowLayout { width: parent.width; spacing: 8
                                 ComboBox {
                                     id: wpCombo
                                     Layout.fillWidth: true; height: 38
                                     model: root.placeNames
-                                    onCurrentIndexChanged: clearResult()
+                                    currentIndex: root.waypointIndexAt(index)
                                     background: Rectangle { color: Theme.background; border.color: Theme.border; radius: Theme.radiusSmall }
                                     contentItem: Text {
                                         text: parent.displayText; color: Theme.textPrimary; font.pixelSize: Theme.fontSizeSmall
                                         leftPadding: 10; verticalAlignment: Text.AlignVCenter
                                     }
-                                    onActivated: function (idx) { root.wayChosen[index] = idx; root.wayChosen = root.wayChosen.slice() }
-                                    Component.onCompleted: currentIndex = root.wayChosen[index]
+                                    onActivated: function (idx) { root.setWaypointIndex(index, idx) }
                                 }
                                 Rectangle {
                                     Layout.preferredWidth: 34; height: 34; radius: 6
                                     color: Theme.danger + "22"
                                     Text { anchors.centerIn: parent; text: "✕"; color: Theme.danger; font.bold: true }
-                                    MouseArea { anchors.fill: parent; onClicked: { root.wayChosen.splice(index, 1); root.wayChosen = root.wayChosen.slice(); clearResult() } }
+                                    MouseArea { anchors.fill: parent; onClicked: root.removeWaypoint(index) }
                                 }
                             }
                         }
@@ -318,7 +364,7 @@ Item {
                             width: parent.width; height: 34; radius: 6
                             color: Theme.accent + "18"; border.color: Theme.accent; border.width: 1
                             Text { anchors.centerIn: parent; text: qsTr("＋ 添加经停"); color: Theme.primary; font.pixelSize: Theme.fontSizeSmall; font.bold: true }
-                            MouseArea { anchors.fill: parent; onClicked: { root.wayChosen.push(-1); root.wayChosen = root.wayChosen.slice() } }
+                            MouseArea { anchors.fill: parent; onClicked: root.addWaypoint() }
                         }
                     }
                     // 规划按钮
@@ -444,19 +490,10 @@ Item {
                 MouseArea {
                     anchors.fill: parent
                     onClicked: {
-                        if (!mapIds.length) return
-                        var last = allStns.filter(function (s) { return Number(s.id) === Number(mapIds[mapIds.length - 1]) })[0]
-                        var placesForNav = mapIds.map(function (id) {
-                            var s = allStns.filter(function (x) { return Number(x.id) === Number(id) })[0]
-                            return s || null
-                        }).filter(function (s) { return !!s })
-                        // 终点取目的地电站；导航起点用“我的位置”
-                        var destLast = placesForNav[placesForNav.length - 1] || last
-                        stackView.push("qrc:/UserClient/qml/pages/NavRoutePage.qml", {
-                            fromLng: 116.397128, fromLat: 39.916527,
-                            toLng: Number(destLast.longitude), toLat: Number(destLast.latitude),
-                            toName: destLast.name || qsTr("充电站")
-                        })
+                        var destLast = root.navDestination()
+                        if (!destLast) return
+                        root.requestNavigation(116.397128, 39.916527,
+                                               destLast.lng, destLast.lat, destLast.name)
                     }
                 }
             }

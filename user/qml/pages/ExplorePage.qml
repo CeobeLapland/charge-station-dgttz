@@ -419,7 +419,17 @@ Item {
         Loader {
             anchors.fill: parent
             source: "qrc:/UserClient/qml/pages/TripPlannerSheet.qml"
-            onLoaded: item.requestClose.connect(function () { root.closeSheet() })
+            onLoaded: {
+                item.requestClose.connect(function () { root.closeSheet() })
+                item.requestNavigation.connect(function (fromLng, fromLat, toLng, toLat, toName) {
+                    root.closeSheet()
+                    root.stackView.push("qrc:/UserClient/qml/pages/NavRoutePage.qml", {
+                        fromLng: fromLng, fromLat: fromLat,
+                        toLng: toLng, toLat: toLat,
+                        toName: toName
+                    })
+                })
+            }
         }
     }
 

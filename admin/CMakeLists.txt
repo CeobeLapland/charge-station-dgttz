@@ -55,6 +55,8 @@ add_executable(admin_client
     src/ui/pages/UserManagePage.cpp
     src/ui/pages/AlarmCenterPage.h
     src/ui/pages/AlarmCenterPage.cpp
+    src/ui/pages/WorkOrderPage.h
+    src/ui/pages/WorkOrderPage.cpp
     src/ui/pages/DecisionPage.h
     src/ui/pages/DecisionPage.cpp
 )

@@ -107,6 +107,8 @@ private:
     QJsonObject handleAdminUserToggleStatus(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
     QJsonObject handleAdminDeviceLog(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
     QJsonObject handleAdminFaultRisk(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+    QJsonObject handleAdminWorkOrderList(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
+    QJsonObject handleAdminWorkOrderHandle(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);
 
     // ---- 订单 order.* ----
     QJsonObject handleOrderCreate(QWebSocket *sock, const QJsonObject &payload, int &code, QString &message);

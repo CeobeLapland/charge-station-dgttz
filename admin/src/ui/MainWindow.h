@@ -13,6 +13,7 @@ class DecisionPage;
 class SalesPage;
 class StationManagePage;
 class UserManagePage;
+class WorkOrderPage;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -39,5 +40,6 @@ private:
     ChargerManagePage* m_chargerManagePage = nullptr;
     StationManagePage* m_stationManagePage = nullptr;
     UserManagePage* m_userManagePage = nullptr;
+    WorkOrderPage* m_workOrderPage = nullptr;
     DecisionPage* m_decisionPage = nullptr;
 };

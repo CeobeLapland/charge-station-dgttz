@@ -154,6 +154,37 @@ QJsonArray& userCache() {
     return cache;
 }
 
+QJsonArray& workOrderCache() {
+    static QJsonArray cache = [] {
+        QJsonArray arr;
+        const QVector<QString> descriptions = {
+            QStringLiteral("你好，我的订单 9007 充到一半停了，想问下是什么情况？"),
+            QStringLiteral("充电站导航过去之后发现入口封闭，希望客服确认可用路线。"),
+            QStringLiteral("优惠券没有自动抵扣，请帮忙看一下。"),
+        };
+        for (int i = 0; i < descriptions.size(); ++i) {
+            QJsonObject w;
+            w.insert(QStringLiteral("id"), 1001 + i);
+            w.insert(QStringLiteral("type"), QStringLiteral("user_complaint"));
+            w.insert(QStringLiteral("priority"), i == 0 ? QStringLiteral("high") : QStringLiteral("normal"));
+            w.insert(QStringLiteral("user_id"), i + 1);
+            w.insert(QStringLiteral("station_id"), i + 1);
+            w.insert(QStringLiteral("station_name"), stationCache().at(i).toObject().value(QStringLiteral("name")).toString());
+            w.insert(QStringLiteral("charger_id"), i == 0 ? 7 : 0);
+            w.insert(QStringLiteral("title"), QStringLiteral("客服消息"));
+            w.insert(QStringLiteral("description"), descriptions[i]);
+            w.insert(QStringLiteral("status"), i == 2 ? QStringLiteral("processing") : QStringLiteral("pending"));
+            w.insert(QStringLiteral("handler"), i == 2 ? QStringLiteral("admin") : QString());
+            w.insert(QStringLiteral("result"), QString());
+            w.insert(QStringLiteral("create_time"), dateOffset(i) + QStringLiteral(" 10:%1:00").arg(20 + i, 2, 10, QChar('0')));
+            w.insert(QStringLiteral("handle_time"), QString());
+            arr.append(w);
+        }
+        return arr;
+    }();
+    return cache;
+}
+
 QJsonArray& salesCache() {
     static QJsonArray cache = [] {
         QJsonArray arr;
@@ -452,6 +483,43 @@ QJsonObject MockDataProvider::deviceLogs(int chargerId) {
     QJsonObject payload;
     payload.insert(QStringLiteral("logs"), logs);
     return okPayload(payload);
+}
+
+QJsonObject MockDataProvider::workOrders(const QString& status) {
+    QJsonArray result;
+    const QJsonArray orders = workOrderCache();
+    for (const QJsonValue& v : orders) {
+        const QJsonObject w = v.toObject();
+        if (status.isEmpty() || w.value(QStringLiteral("status")).toString() == status) {
+            result.append(w);
+        }
+    }
+    QJsonObject payload;
+    payload.insert(QStringLiteral("work_orders"), result);
+    return okPayload(payload);
+}
+
+QJsonObject MockDataProvider::handleWorkOrder(int workOrderId, const QString& status,
+                                              const QString& result) {
+    if (result.trimmed().isEmpty()) {
+        return errPayload(proto::code::BadMessageFormat, QStringLiteral("回复内容不能为空"));
+    }
+    QJsonArray& orders = workOrderCache();
+    for (QJsonValueRef ov : orders) {
+        QJsonObject obj = ov.toObject();
+        if (obj.value(QStringLiteral("id")).toInt() == workOrderId) {
+            obj.insert(QStringLiteral("status"), status.isEmpty() ? QStringLiteral("completed") : status);
+            obj.insert(QStringLiteral("handler"), QStringLiteral("admin"));
+            obj.insert(QStringLiteral("result"), result.trimmed());
+            obj.insert(QStringLiteral("handle_time"), now());
+            ov = obj;
+            QJsonObject payload;
+            payload.insert(QStringLiteral("work_order"), obj);
+            payload.insert(QStringLiteral("notification_id"), workOrderId + 7000);
+            return okPayload(payload);
+        }
+    }
+    return errPayload(proto::code::DataNotFound, QStringLiteral("工单不存在"));
 }
 
 QJsonObject MockDataProvider::orderDailyStats() {

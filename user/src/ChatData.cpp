@@ -223,6 +223,13 @@ bool ChatData::sendMessage(int conversationId, const QString& content) {
             m.insert(QStringLiteral("id"), m_nextMsgId++);
             c.msgs.append(m);
             c.unread = 0;
+            if (m_sendBackend && c.category == QStringLiteral("service")) {
+                m_sendBackend(QStringLiteral("work_order.create"), {
+                    {"type", QStringLiteral("user_complaint")},
+                    {"title", QStringLiteral("客服消息")},
+                    {"description", trimmed},
+                });
+            }
             emit dataChanged();
             return true;
         }
@@ -261,6 +268,22 @@ void ChatData::markRead(int conversationId) {
     for (auto& c : m_convs) {
         if (c.id == conversationId && c.unread > 0) {
             c.unread = 0;
+            emit dataChanged();
+            return;
+        }
+    }
+}
+
+void ChatData::addServiceReply(const QString& content) {
+    const QString trimmed = content.trimmed();
+    if (trimmed.isEmpty())
+        return;
+    for (auto& c : m_convs) {
+        if (c.category == QStringLiteral("service")) {
+            auto m = msg(QStringLiteral("in"), trimmed, QDateTime::currentDateTime());
+            m.insert(QStringLiteral("id"), m_nextMsgId++);
+            c.msgs.append(m);
+            ++c.unread;
             emit dataChanged();
             return;
         }

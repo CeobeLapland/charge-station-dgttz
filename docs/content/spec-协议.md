@@ -143,7 +143,7 @@
 | `ml.forecast` | C→S | 主动查询负荷预测 | station_id, horizon |
 | `ml.forecast_resp` | S→C | **当前返回 5001（模型未接入）** | — |
 
-`screen.snapshot_resp.payload` 结构见 `screen/API_CONTRACT.md` 第 4 节，服务端已按该结构实现。
+`screen.snapshot_resp.payload` 结构见 `screen/SERVER_INTEGRATION_REQUIREMENTS.md`，服务端按该结构兼容输出。
 
 ### 系统与机器学习
 
@@ -211,6 +211,7 @@
 | type | 方向 | 说明 | payload 要点 |
 | ---- | ---- | ---- | ------------ |
 | `push.work_order` | S→管理端 | 新工单实时推送 | work_order |
+| `push.notification` | S→用户端 | 站内消息/客服回复实时推送 | notification, work_order? |
 | `push.review` | S→大屏/管理端 | 新评价实时推送 | review |
 
 > 注：`order.settle` 可携带 `coupon_id` 完成券核销抵扣；抵扣时订单实付金额 = 应收 − 券面额。

@@ -327,8 +327,11 @@ void ChargingFlow::mockStartCharging() {
 
 void ChargingFlow::finishCharging() {
     if (m_backendOnline && m_sendBackend && m_orderId > 0) {
-        // order.finish：服务端用仿真电量结算，客户端不传 end_soc
-        m_sendBackend(QStringLiteral("order.finish"), S({{"order_id", m_orderId}}));
+        // order.finish：优先把客户端当前 SOC 带给服务端；服务端仍会用仿真值/时长兜底。
+        m_sendBackend(QStringLiteral("order.finish"), S({
+            {"order_id", m_orderId},
+            {"end_soc", m_flow.value(QStringLiteral("soc"), -1.0)},
+        }));
         return;
     }
     mockFinishCharging(true);
@@ -575,6 +578,11 @@ QVariantMap ChargingFlow::currentOrder() const {
                                                  : m_flow.value(QStringLiteral("end_soc")));
         o.insert(QStringLiteral("energy_kwh"), m_flow.value(QStringLiteral("energy_kwh")));
         o.insert(QStringLiteral("cost"), m_flow.value(QStringLiteral("cost")));
+        o.insert(QStringLiteral("amount"), m_flow.value(QStringLiteral("amount"), m_flow.value(QStringLiteral("cost"))));
+        o.insert(QStringLiteral("pay_amount"), m_flow.value(QStringLiteral("pay_amount"),
+                                                            m_flow.value(QStringLiteral("amount"),
+                                                                         m_flow.value(QStringLiteral("cost")))));
+        o.insert(QStringLiteral("duration_min"), m_flow.value(QStringLiteral("duration_min")));
     }
     return o;
 }
@@ -746,6 +754,7 @@ void ChargingFlow::handleOrderCreated(int orderId) {
         m_sendBackend(QStringLiteral("order.start"), S({
             {"order_id", orderId},
             {"start_soc", kStartSocDefault},
+            {"target_soc", m_flow.value(QStringLiteral("target_soc"), 100)},
         }));
 }
 
@@ -776,6 +785,8 @@ void ChargingFlow::handleOrderProgress(const QVariantMap& p) {
     m_flow.insert(QStringLiteral("power_kw"), p.value(QStringLiteral("power_kw")));
     m_flow.insert(QStringLiteral("energy_kwh"), p.value(QStringLiteral("energy")));
     m_flow.insert(QStringLiteral("cost"), p.value(QStringLiteral("cost")));
+    m_flow.insert(QStringLiteral("amount"), p.value(QStringLiteral("cost")));
+    m_flow.insert(QStringLiteral("pay_amount"), p.value(QStringLiteral("cost")));
     // 服务端 push 无时长字段，本地按开始充电时间折算
     const QDateTime start = QDateTime::fromString(m_chargedAt, QStringLiteral("yyyy-MM-dd HH:mm:ss"));
     if (start.isValid())
@@ -799,6 +810,8 @@ void ChargingFlow::handleOrderFinished(const QVariantMap& order) {
     // 结束电量以服务端结算值为准
     if (order.contains(QStringLiteral("end_soc")))
         m_flow.insert(QStringLiteral("soc"), order.value(QStringLiteral("end_soc")));
+    if (!m_flow.contains(QStringLiteral("pay_amount")))
+        m_flow.insert(QStringLiteral("pay_amount"), m_flow.value(QStringLiteral("amount"), 0.0));
     setPhase(QStringLiteral("settle"));
     mockStartOccupy();
 }
@@ -834,8 +847,14 @@ void ChargingFlow::applyOrderToFlow(const QVariantMap& order) {
         QStringLiteral("start_time"), QStringLiteral("end_time"), QStringLiteral("create_time"),
         QStringLiteral("settle_time"), QStringLiteral("price_level"),
     };
+    const QStringList settlementKeys = {
+        QStringLiteral("end_soc"), QStringLiteral("energy_kwh"), QStringLiteral("amount"),
+        QStringLiteral("discount_amount"), QStringLiteral("pay_amount"),
+        QStringLiteral("duration_min"), QStringLiteral("points_earned"),
+        QStringLiteral("end_time"), QStringLiteral("settle_time"), QStringLiteral("price_level"),
+    };
     for (const QString& k : keys) {
-        if (order.contains(k) && !m_flow.contains(k))
+        if (order.contains(k) && (settlementKeys.contains(k) || !m_flow.contains(k)))
             m_flow.insert(k, order.value(k));
     }
     // 开始时间：充电/结算展示统一用服务端 start_time

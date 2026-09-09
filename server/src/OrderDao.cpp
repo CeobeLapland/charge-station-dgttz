@@ -468,7 +468,7 @@ std::optional<OrderView> createOrder(int userId, int stationId, int chargerId, O
 }
 
 // ==================== 开始充电 ====================
-std::optional<OrderView> startOrder(int userId, int orderId, double startSoc, OpError *err)
+std::optional<OrderView> startOrder(int userId, int orderId, double startSoc, double targetSoc, OpError *err)
 {
     const auto o = fetchOwnOrder(userId, orderId, err);
     if (!o) return std::nullopt;
@@ -482,14 +482,16 @@ std::optional<OrderView> startOrder(int userId, int orderId, double startSoc, Op
         return std::nullopt;
     }
     if (startSoc < 0 || startSoc > 100) startSoc = 20.0;   // 默认起始电量
+    if (targetSoc <= startSoc || targetSoc > 100) targetSoc = 100.0;
 
     QSqlDatabase::database().transaction();
     QSqlQuery up;
     up.prepare(QStringLiteral(
-        "UPDATE charging_order SET status='charging', start_time=?, start_soc=?, target_soc=100 "
+        "UPDATE charging_order SET status='charging', start_time=?, start_soc=?, target_soc=? "
         "WHERE id=?"));
     up.addBindValue(nowStr());
     up.addBindValue(startSoc);
+    up.addBindValue(targetSoc);
     up.addBindValue(orderId);
     if (!up.exec()) {
         QSqlDatabase::database().rollback();
@@ -545,6 +547,13 @@ std::optional<OrderView> finishOrder(int userId, int orderId, double endSoc, OpE
         if (maxMin > 0 && durationMin > maxMin) durationMin = maxMin;
     }
     energy = std::round(energy * 100) / 100.0;
+    if (energy <= 0.0 && powerKw > 0.0) {
+        const double cap = batteryKwh > 0 ? batteryKwh : 60.0;
+        const double roomKwh = qMax(0.0, (100.0 - o->startSoc) / 100.0 * cap);
+        energy = std::round(qMin(roomKwh, powerKw * (durationMin / 60.0) * 0.92) * 100) / 100.0;
+        if (energy > 0.0)
+            finalSoc = qMin(100.0, o->startSoc + energy / cap * 100.0);
+    }
 
     // --- 金额 = 电量 × (分时电价 + 服务费) ---
     const int     hour   = st.isValid() ? st.time().hour() : QTime::currentTime().hour();

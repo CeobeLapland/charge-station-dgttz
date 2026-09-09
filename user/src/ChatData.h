@@ -6,6 +6,8 @@
 #include <QVariantList>
 #include <QVariantMap>
 
+#include <functional>
+
 // 消息中心会话数据层（内存示例态，仿微信/QQ 会话列表）。
 // 一个「会话」= 一个对话卡片（按消息类型聚合），内部由多条消息(msg)组成：
 //   conversations()  -> 会话卡片列表 {id, category, title, icon, color, interactive, unread, last_time}
@@ -30,6 +32,12 @@ public:
     Q_INVOKABLE bool clearConversation(int conversationId);
     Q_INVOKABLE void markRead(int conversationId);
 
+    void addServiceReply(const QString& content);
+
+    void setBackendSender(std::function<void(const QString&, const QVariantMap&)> sender) {
+        m_sendBackend = std::move(sender);
+    }
+
 signals:
     void dataChanged();
 
@@ -46,4 +54,5 @@ private:
     };
     QList<Conversation> m_convs;
     int m_nextMsgId = 1;
+    std::function<void(const QString&, const QVariantMap&)> m_sendBackend;
 };
