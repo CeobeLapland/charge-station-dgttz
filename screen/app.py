@@ -118,6 +118,146 @@ function run(){
 </script>
 </body></html>"""
 
+def _q(sql):
+    """执行查询，返回 (ok, rows[list[list]], err)"""
+    ok, cols, rows, elapsed, err = run_hive_sql(sql)
+    return ok, ok and rows or [], ("" if ok else err)
+
+def _row0(rows):
+    """返回第一行第一列或 None"""
+    return rows[0][0] if rows else None
+
+def build_snapshot():
+    """从 Hive 聚合出大屏需要的完整快照（与 screen.snapshot_resp.payload 同构）"""
+    # 1) 状态分布：charger.status group by（reserved 并入 charging）
+    ok, rows, err = _q("select status,count(*) as c from `chargestation`.`charger` group by status;")
+    sd = {"idle": 0, "charging": 0, "offline": 0, "fault": 0}
+    for r in rows or []:
+        st, n = (r[0] or "").strip(), int(r[1] or 0)
+        if st == "idle": sd["idle"] = n
+        elif st == "offline": sd["offline"] = n
+        elif st == "fault": sd["fault"] = n
+        else: sd["charging"] += n  # charging / reserved 都算在充电
+    # 桩总数 & 在线桩 = idle + charging
+    ok, rows_c, err = _q("select count(*) from `chargestation`.`charger`;")
+    charger_count = int(_row0(rows_c) or 0)
+    online_charger_count = sd["idle"] + sd["charging"]
+
+    # 2) 站点数与在线率
+    _ok, rows_s, _ = _q("select count(*) from `chargestation`.`station`;")
+    station_count = int(_row0(rows_s) or 0)
+
+    # 3) 订单指标：今日订单/近30天电量/收入
+    year, month, day = "2026", "09", "10"  # 以数据日期最大日作为"今天"
+    _ok, rows_t, _ = _q(f"select count(*), round(sum(energy_kwh),1), round(sum(pay_amount),2) from `chargestation`.`charging_order` where create_time like '{year}-{month}-{day}%';")
+    today_orders = today_energy = today_revenue = 0
+    if rows_t and rows_t[0]:
+        today_orders = int(rows_t[0][0] or 0)
+        today_energy = float(rows_t[0][1] or 0)
+        today_revenue = float(rows_t[0][2] or 0)
+
+    # 4) 近7天趋势（按创建日期分组）
+    trend_rows_by_date = {}
+    _ok, rows_trend, _ = _q(f"select substr(create_time,1,10) as d, count(*), round(sum(energy_kwh),1), round(sum(pay_amount),2) from `chargestation`.`charging_order` group by substr(create_time,1,10) order by d desc limit 7;")
+    order_trend, energy_revenue_trend = [], []
+    for r in (rows_trend or []):
+        d = r[0]
+        order_trend.append({"date": d, "order_count": int(r[1] or 0)})
+        energy_revenue_trend.append({"date": d, "energy_kwh": float(r[2] or 0), "revenue": float(r[3] or 0)})
+    order_trend.reverse(); energy_revenue_trend.reverse()
+
+    # 5) 站点排行（近30天每站订单量）
+    station_rank = []
+    _ok, rows_rank, _ = _q("select s.id, s.name, count(o.id) as c, round(sum(o.energy_kwh),1) from `chargestation`.`charging_order` o join `chargestation`.`station` s on o.station_id=s.id where o.create_time >= '2026-08-11' group by s.id, s.name order by c desc limit 5;")
+    for r in (rows_rank or []):
+        station_rank.append({"station_id": r[0], "station_name": r[1], "today_orders": int(r[2] or 0), "today_energy_kwh": float(r[3] or 0)})
+
+    # 6) 地图站点
+    stations = []
+    _ok, rows_map, _ = _q("select id,name,area,longitude,latitude from `chargestation`.`station`;")
+    for r in (rows_map or []):
+        try:
+            lon = float(r[3] or 0); lat = float(r[4] or 0)
+        except Exception:
+            lon = lat = 0
+        stations.append({"id": r[0], "name": r[1], "region": r[2] or "", "longitude": lon, "latitude": lat, "status": "normal", "status_text": "正常运行"})
+
+    # 7) 告警
+    alarms = []
+    _ok, rows_a, _ = _q("select id, station_id, level, occur_time from `chargestation`.`alarm` order by occur_time desc limit 10;")
+    for r in (rows_a or []):
+        st_name = ""
+        alarms.append({"id": r[0], "occur_time": r[3], "station_id": r[1], "station_name": st_name, "charger_id": None, "charger_code": "", "content": f"告警等级 {r[2]}", "level": r[2] if r[2] in ("info","warning","critical") else "warning"})
+
+    # 8) 用户增长趋势（近7日注册）
+    user_trend = []
+    _ok, rows_u, _ = _q("select substr(register_time,1,10) as d, count(*) from `chargestation`.`user` where register_time >= '2026-09-04' group by substr(register_time,1,10) order by d;")
+    for r in (rows_u or []):
+        user_trend.append({"date": r[0], "user_count": int(r[1] or 0)})
+
+    # 9) 峰谷电量（按时段手动分档，与默认 price_rule 一致）
+    #    谷 00-08 / 平 08-17+21-24 / 峰 17-21
+    _ok, rows_pv, _ = _q("select substr(start_time,12,2) as h, round(sum(energy_kwh),1) from `chargestation`.`charging_order` group by substr(start_time,12,2);")
+    pv = {"day": today_energy, "valley": 0.0, "flat": 0.0, "peak": 0.0}
+    for r in (rows_pv or []):
+        try:
+            hh = int(r[0]); e = float(r[1] or 0)
+        except Exception:
+            continue
+        if 0 <= hh < 8: pv["valley"] += e
+        elif 17 <= hh < 21: pv["peak"] += e
+        else: pv["flat"] += e
+
+    # 10) 碳排 / 绿色充电指数（碳排因子 0.7kg/kWh）
+    _ok, rows_e, _ = _q("select round(sum(energy_kwh),1) from `chargestation`.`charging_order`;")
+    total_energy = float(_row0(rows_e) or 0)
+    FACTOR = 0.7  # kg CO2 / kWh
+    today_reduce = round(today_energy * FACTOR / 1000.0, 2)      # 吨
+    total_reduce = round(total_energy * FACTOR / 1000.0, 2)
+    valley_ratio = (pv["valley"] / pv["day"]) if pv["day"] else 0
+    green_index = round(min(100, 60 + valley_ratio * 40), 1)     # 基于谷电占比的样子指数
+    carbon = {
+        "today_energy_kwh": today_energy,
+        "today_reduce_tons": today_reduce,
+        "total_energy_kwh": total_energy,
+        "total_reduce_tons": total_reduce,
+        "green_index": green_index,
+    }
+
+    # 11) 实时事件流（订单创建 + 告警）
+    events = []
+    _ok, rows_ev, _ = _q("select id, create_time, user_id, station_id from `chargestation`.`charging_order` order by create_time desc limit 8;")
+    st_map = {str(s["id"]): s["name"] for s in stations}
+    for r in (rows_ev or []):
+        uid = r[2]; st = st_map.get(str(r[3]), "某站")
+        phone = f"用户{uid}"
+        events.append({"id": f"evt-o{r[0]}", "occur_time": r[1], "type": "order", "content": f"{phone} 在 {st} 完成充电"})
+    for r in (rows_a or []):
+        events.append({"id": f"evt-a{r[0]}", "occur_time": r[3], "type": "alarm", "content": f"站点发生{ r[2] }告警"})
+    events = events[:10]
+
+    return {
+        "metrics": {
+            "station_count": station_count,
+            "charger_count": charger_count,
+            "online_charger_count": online_charger_count,
+            "today_energy_kwh": today_energy,
+            "today_orders": today_orders,
+            "today_revenue": today_revenue,
+        },
+        "status_distribution": sd,
+        "order_trend": order_trend,
+        "energy_revenue_trend": energy_revenue_trend,
+        "station_rank": station_rank,
+        "stations": stations,
+        "alarms": alarms,
+        "events": events,
+        "user_trend": user_trend,
+        "peak_valley": pv,
+        "carbon": carbon,
+        "filter_options": {"regions": [], "stations": [{"id": s["id"], "name": s["name"]} for s in stations]},
+    }
+
 class Handler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *a, **kw):
         super().__init__(*a, directory=SCREEN_DIR, **kw)
@@ -138,6 +278,18 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if parsed.path == "/":
             # 跳到 index.html（大屏）
             self.path = "/index.html"
+        if parsed.path == "/api/snapshot":
+            try:
+                payload = build_snapshot()
+            except Exception as e:
+                payload = {"error": str(e)}
+            body = json.dumps(payload, ensure_ascii=False)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body.encode("utf-8"))
+            return
         super().do_GET()
 
     def do_POST(self):
