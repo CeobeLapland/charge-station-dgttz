@@ -1,27 +1,44 @@
 # 后续扩充计划（Big Demo 增强路线图）
 
 > 目的：把「接下来还能加什么」完整记录下来，避免在长对话里遗忘。每条含「为什么做、怎么做、优先级、需不需要接到 Hive」。
-> 现状基线：大屏已接 Hive 真实数据；Spark-SQL 8维分析可跑；PME 负荷预测已上大屏；/hadoop 查询页有 SPARK-SQL 板块；30 表在 Hive `chargestation`。
-> ⚠️ 已知待修：`近7天充电量与收入`、`未来24h负荷预测` 两块图表空白（疑 `/api/snapshot` 后端慢/卡）。
+> 现状基线：大屏已接 Hive 真实数据并秒回缓存；Spark-SQL 8维分析可跑；PME 负荷预测已上大屏；/hadoop 查询页有 SPARK-SQL 板块；30 表在 Hive `chargestation`；浅色主题已完成。
+> ✅ 重大历史 Bug 均已修复：/api/snapshot 卡顿(改走 dash_cache.json Spark 预聚合缓存)、"近7天电量收入""负荷预测"空白(energyRevenue 双Y轴崩溃→单次 setOption)。筛选做了保底(见 §七)。
 
 ---
 
-## 一、必须先修的 Bug（优先级最高，影响演示）
+## 0. 交接速查（新会话/新组员必读，快速上手）
 
-### Bug 1：`/api/snapshot` 卡住/慢
-- 现象：`curl /api/snapshot` 等了 10 分钟无响应。
-- 影响：大屏主数据接口慢 → 页面空白或加载卡。`近7天电量收入`(energy_revenue_trend)、`未来24h预测`(forecast 走独立接口但由 snapshot 逻辑依赖) 都可能是这个原因。
-- 待查：build_snapshot() 里某条 beeline 查询（可能 count 大表 / group by / join）超时；或 beeline 进程连接泄漏。
-- 修法候选：
-  1. 给每次 `_q()` 查询加**超时**（beeline 用 `timeout 数字` 包裹），超时返回空而非卡死。
-  2. 复查是否某条 SQL 在 beeline 上特别慢（`charging_order` 528 行不该慢；`charging_measure` 8 万行 count 会慢）。
-  3. 看 `~/gateway.log` 和 `~/hs2.log` 有没有报错。
-- 验证：修完 `curl /api/snapshot` 应 1~3 秒返回。
+**演示环境**：CentOS7 虚拟机 `192.168.176.100`(node100)，用户/密码 `hadoop/hadoop`。SecureCRT 连接。
+**三入口**：
+- 大屏：`http://192.168.176.100:8080/index.html`（默认 mock；带 `?mode=live` 走 Hive 真实数据）
+- Hadoop 查询页：`http://192.168.176.100:8080/hadoop`（含 SPARK-SQL 多维分析按钮）
+- Hadoop 官方 UI：HDFS `:9870`、YARN `:8088`
 
-### Bug 2：前端空白（若 Bug1 修完仍空）
-- 若接口数据正常但页面空，查 `energyRevenue()` 二次 `setOption`(双 y 轴) 是否清空了 series；查 forecast 的 ECharts 置信区间 series 配置。
+**一键启动（关机重启后）**：见《Hadoop环境操作与重启恢复手册》§3：
+```bash
+start-all.sh          # 启动 HDFS+YARN
+nohup hiveserver2 > ~/hs2.log 2>&1 &    # 启动 Hive
+cd ~/screen && nohup python3 app.py 8080 /home/hadoop/screen > ~/gateway.log 2>&1 &  # 启动网关
+# 网关读 ~/screen/dash_cache.json 秒回；若删除它需重跑:
+# spark-submit --master local[2] /home/hadoop/screen/dash_engine.py /home/hadoop/screen/dash_cache.json
+```
+
+**关键文件（服务器 ~/screen/）**：
+- `app.py` 网关（/api/snapshot 读 dash_cache 秒回、/api/forecast PME、/api/spark、/api/hive、/hadoop 页）
+- `dash_engine.py`  + `dash_cache.json`  Spark 预聚合缓存（大屏秒回的核心）
+- `index.html` / `css/` / `js/`  大屏前端
+- 仓库同步源在 Windows：`screen/`、`machine_learning/`、`docs/`
+
+**改前必知**：
+- 数据都在 Hive（spark 直连 MySQL metastore，已配好）。
+- Spark 查询每条 ~15-30s（起 JVM），**别在大屏热路径逐条 spark**——用了 dash_cache 缓存回避。
+- git 提交前 `git status` 确认。
 
 ---
+
+## 一、有待处理的 Bug / 已知限制
+- ✅ 历史大屏 Bug 已全修复（卡顿、空白图）。
+- ⚠️ 筛选联动：界面可用、秒回不崩，但**暂按全量展示**（未真正按所选范围重算）。原因：spark 单条启动过慢。若要做真筛选，需 Spark 常驻会话(保活 pyspark)方案。
 
 ## 二、机器学习扩充（面子工程，可逐个加）
 
@@ -100,11 +117,11 @@
 
 ## 七、待办坑位（防遗忘）
 
-- [ ] 修 /api/snapshot 超时/卡顿
-- [ ] 修"近7天电量收入"空白
-- [ ] 修"未来24h负荷预测"空白
-- [ ] 深色驾驶舱主题
-- [ ] 筛选联动全部模块
+- [x] 修 /api/snapshot 超时/卡顿（改走 dash_cache.json Spark 预聚合缓存，秒回）
+- [x] 修"近7天电量收入"空白（energyRevenue 分两次 setOption 双Y轴崩溃 → 单次 setOption）
+- [x] 修"未来24h负荷预测"空白（同上 + 读缓存）
+- [x] 浅色主题质感提升（dashboard.css 重写：圆角/阴影/渐变指标卡）
+- [~] 筛选联动：界面可用；实时按筛选重算因 spark 单条启动过慢(~30s)，已回退为"筛选时仍展示全量(秒回不崩)"。**若要真正重算**，需 Spark 会话保活(常驻 pyspark)方案——后续可选优化
 - [ ] 数据导入接口 /admin
 - [ ] 造大数据脚本 gen_bigdata.py
 - [ ] ML: 需求热力面板
