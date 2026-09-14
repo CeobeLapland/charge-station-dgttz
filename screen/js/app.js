@@ -22,6 +22,8 @@
     }).catch(e => { DataStore.setError("加载 Hive 数据失败: " + e); });
     window.loadHiveData = loadHiveData;
     loadHiveData();
+    // 机器学习：未来24h负荷预测（PME）
+    fetch("/api/forecast").then(r => r.json()).then(fc => { if (fc && !fc.error && window.ScreenCharts) window.ScreenCharts.forecast(fc); }).catch(()=>{});
   }
   else DataStore.setSnapshot(ScreenMockSnapshot);
 }());

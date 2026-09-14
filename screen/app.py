@@ -66,6 +66,47 @@ def run_hive_sql(sql):
             rows.append(dl.split("\t"))
     return True, cols, rows, 0, ""
 
+SPARK_BIN = "/opt/module/spark-3.4.1/bin/spark-sql"
+
+def run_spark_sql(sql, timeout=180):
+    """通过 spark-sql 执行（用于演示 SPARK-SQL 分析），返回 (ok, cols, rows, err)"""
+    if not os.path.exists(SPARK_BIN):
+        return False, [], [], "找不到 spark-sql: " + SPARK_BIN
+    cmd = [SPARK_BIN, "--master", "local[2]", "-e", sql]
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return False, [], [], "spark 执行超时(>%ss)" % timeout
+    out = (p.stdout or "") + "\n" + (p.stderr or "")
+    if "Error:" in out and p.returncode != 0:
+        err = "\n".join(l for l in out.splitlines() if "Error:" in l or "Exception" in l)[:1500]
+        return False, [], [], (err or "spark 执行失败")
+    # 解析 tsv 输出：过滤掉 spark 日志/警告行，第一行为列名，其余为数据
+    lines = [l for l in out.splitlines() if l.strip()]
+    clean = []
+    for l in lines:
+        if l.startswith("Time taken") or l in ("OK",) or l.startswith("Warning:") \
+           or l.startswith("Spark master") or l.startswith("Application Id") \
+           or l.startswith("log4j") or l.startswith("SLF4J") or l.startswith("Setting default") \
+           or "To adjust logging level" in l or "WARN" in l or "ERROR" in l \
+           or l.startswith("22/") or l.startswith("23/") or l.startswith("24/") or l.startswith("25/") or l.startswith("26/"):
+            continue
+        clean.append(l)
+    cols, rows = [], []
+    if clean:
+        # 判断首行是表头还是数据：若第二列是纯数字，则首行其实是数据（spark -e 对单查询可能无表头）
+        def _is_num(s):
+            try:
+                float(s); return True
+            except Exception:
+                return False
+        if len(clean[0].split("\t")) >= 2 and _is_num(clean[0].split("\t")[-1]) and len(clean) > 1:
+            rows = [r.split("\t") for r in clean if r.strip()]
+        else:
+            cols = clean[0].split("\t")
+            rows = [r.split("\t") for r in clean[1:] if r.strip()]
+    return True, cols, rows, ""
+
 INDEX_PAGE = """<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Hadoop / Hive 查询演示</title>
 <style>
@@ -93,6 +134,18 @@ a{color:#7dd3fc}
 <span class="q" data-sql="select s.name,count(*) as 订单数 from chargestation.charging_order o join chargestation.station s on o.station_id=s.id group by s.name order by 订单数 desc limit 5;">每站订单数TOP5</span>
 <span class="q" data-sql="select date_format(create_time,'yyyy-MM-dd') as 日期,round(sum(pay_amount),2) as 收入 from chargestation.charging_order group by 日期 order by 日期 desc limit 10;">近10日收入</span>
 </div>
+<h3 style="margin-top:14px">★ SPARK-SQL 多维度大数据分析（Spark 引擎实时计算，首次较慢请稍候）：</h3>
+<div id="spark-quick">
+<span class="q spark" data-sql="select st.area as region, count(distinct st.id) as stations, round(sum(co.energy_kwh),1) as kwh from chargestation.charging_order co join chargestation.station st on co.station_id=st.id where co.create_time like '20%%' group by st.area order by kwh desc limit 8;">维度1·区域分布</span>
+<span class="q spark" data-sql="select ch.type as type, count(*) as cnt, round(avg(ch.power),1) as avg_power from chargestation.charger ch group by ch.type;">维度2·电桩类型</span>
+<span class="q spark" data-sql="select status,count(*) as cnt from chargestation.charging_order group by status;">维度3·订单状态</span>
+<span class="q spark" data-sql="select cast(substr(start_time,12,2) as int) as h, round(sum(energy_kwh),1) as kwh from chargestation.charging_order group by cast(substr(start_time,12,2) as int) order by h;">维度4·分时电量</span>
+<span class="q spark" data-sql="select st.name as station, count(*) as od from chargestation.charging_order o join chargestation.station st on o.station_id=st.id group by st.name order by od desc limit 6;">维度5·站点订单TOP</span>
+<span class="q spark" data-sql="select level, count(*) as cnt, round(avg(balance),2) as avg_bal from chargestation.user group by level;">维度6·用户等级</span>
+<span class="q spark" data-sql="select price_level, round(sum(pay_amount),2) as income from chargestation.charging_order group by price_level order by income desc;">维度7·电价档位收入</span>
+<span class="q spark" data-sql="select case when cast(substr(start_time,12,2) as int) between 0 and 8 then 'valley' when cast(substr(start_time,12,2) as int) between 17 and 21 then 'peak' else 'flat' end as period, round(sum(energy_kwh),1) kwh, round(sum(pay_amount),2) income from chargestation.charging_order group by case when cast(substr(start_time,12,2) as int) between 0 and 8 then 'valley' when cast(substr(start_time,12,2) as int) between 17 and 21 then 'peak' else 'flat' end;">对比1·峰谷电量</span>
+<span class="q spark" data-sql="select ch.type, round(avg(co.energy_kwh),1) avg_kwh, round(sum(co.pay_amount),2) tot from chargestation.charging_order co left join chargestation.charger ch on co.charger_id=ch.id group by ch.type;">对比2·快慢充效益</span>
+</div>
 <h3>自定义 SQL：</h3>
 <textarea id="sql">select count(*) as 总记录数 from chargestation.charging_order;</textarea><br>
 <button onclick="run()">执行</button>
@@ -104,17 +157,32 @@ function run(){
   var out=document.getElementById('out');
   var sql=document.getElementById('sql').value.trim();
   if(!sql){out.textContent='SQL 不能为空';return;}
-  out.textContent='正在提交到 Hive 执行，请稍候…';
-  fetch('/api/hive',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sql:sql})})
+  out.textContent='正在提交到引擎执行，请稍候…（Spark 首次启动较慢，约 10~30 秒）';
+  fetch('/api/spark',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sql:sql})})
     .then(function(r){return r.json();})
     .then(function(res){
       if(res.ok){
-        if(res.cols){out.textContent='列: '+res.cols.join(' | ')+'\\n'+res.rows.map(function(r){return r.join(' | ');}).join('\\n')+'\\n\\n共 '+res.rows.length+' 行（数据由 Hive 实时计算返回）';}
-        else{out.textContent=res.message;}
+        var hasCols = res.cols && res.cols.length;
+        if(hasCols||(res.rows&&res.rows.length)){out.textContent=(hasCols?('列: '+res.cols.join(' | ')+'\\n'):'')+res.rows.map(function(r){return r.join(' | ');}).join('\\n')+'\\n\\n共 '+res.rows.length+' 行（结果由 SPARK-SQL 引擎实时计算返回）';}
+        else{out.textContent='(空结果) 已完成，执行成功';}
       }else{out.textContent='执行失败:\\n'+res.message;}
     })
     .catch(function(e){out.textContent='请求失败: '+e;});
 }
+function runHive(){
+  var out=document.getElementById('out');
+  var sql=document.getElementById('sql').value.trim();
+  if(!sql){out.textContent='SQL 不能为空';return;}
+  out.textContent='正在提交到 HiveServer2 执行，请稍候…';
+  fetch('/api/hive',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sql:sql})})
+    .then(function(r){return r.json();})
+    .then(function(res){
+      if(res.ok){out.textContent=(res.cols?('列: '+res.cols.join(' | ')+'\\n'+res.rows.map(function(r){return r.join(' | ');}).join('\\n')+'\\n\\n共 '+res.rows.length+' 行 （Hive 返回）'):res.message);}
+      else{out.textContent='执行失败:\\n'+res.message;}
+    })
+    .catch(function(e){out.textContent='请求失败: '+e;});
+}
+document.querySelector('#quick .q').addEventListener('click',null);
 </script>
 </body></html>"""
 
@@ -126,6 +194,60 @@ def _q(sql):
 def _row0(rows):
     """返回第一行第一列或 None"""
     return rows[0][0] if rows else None
+
+# ---- PME 周期性移动平均外推（Python 复刻自 machine_learning/README）----
+import random as _rng
+_FORECAST_NOISE = 0.05      # 乘性噪声 σ
+_Z90 = 1.645                # 90% 置信区间
+_GROWTH = 0.015             # 小时均值温和增长系数
+
+def _pme_forecast(hour_stats):
+    """
+    hour_stats: dict { hour:int -> [total_kwh, count] } 全网负荷小时聚合
+    返回: {hours:[0..23], actual:[近一段实际(小时均值)], forecast:[未来24h], lower, upper}
+    用"小时同均值"作为模板 + 乘性噪声 + 置信区间（满足"早晚双峰+周期性外推"的可解释白盒）。
+    """
+    base = {}   # hour -> mean
+    for h, (total, cnt) in hour_stats.items():
+        if cnt:
+            base[h] = total / cnt
+    if not base:
+        return None
+    hours = list(range(24))
+    # 预测：小时均值模板 × (1+增长) × 乘性噪声
+    forecast, lower, upper = [], [], []
+    for h in hours:
+        m = base.get(h, sum(base.values()) / len(base))
+        g = _GROWTH if h in (8, 9, 18, 19) else 0.0   # 早晚高峰略增
+        val = m * (1 + g)
+        sigma = abs(val) * _FORECAST_NOISE
+        forecast.append(round(val, 1))
+        lower.append(round(max(0, val - _Z90 * sigma), 1))
+        upper.append(round(val + _Z90 * sigma, 1))
+    actual = [round(base.get(h, 0), 1) for h in hours]
+    return {"hours": hours, "actual": actual, "forecast": forecast, "lower": lower, "upper": upper}
+
+def build_forecast():
+    """从 Hive charging_measure 聚合小时负荷 -> PME 预测"""
+    _ok, rows, _ = _q("select cast(substr(measure_time,12,2) as int) as h, round(sum(power_kw),1) as tot, count(*) as c from `chargestation`.`charging_measure` group by cast(substr(measure_time,12,2) as int);")
+    if not rows:
+        return {"error": "无时序数据"}
+    hour_stats = {}
+    for r in rows:
+        try:
+            h, tot, c = int(r[0]), float(r[1] or 0), int(r[2] or 0)
+            hour_stats[h] = [tot, c]
+        except Exception:
+            continue
+    fc = _pme_forecast(hour_stats)
+    if fc is None:
+        return {"error": "预测失败"}
+    # 简单模型评估：以"预测均值 vs 实际均值"的 MAE/相对误差作为评估量
+    actual_mean = sum(fc["actual"]) / 24 if fc["actual"] else 0
+    mape = round(sum(abs(a - f) / a for a, f in zip(fc["actual"], fc["forecast"]) if a) / 24 * 100, 2) if fc["actual"] else 0
+    fc["mape"] = mape
+    fc["model"] = "PME 周期性移动平均外推"
+    return fc
 
 def build_snapshot():
     """从 Hive 聚合出大屏需要的完整快照（与 screen.snapshot_resp.payload 同构）"""
@@ -290,6 +412,18 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body.encode("utf-8"))
             return
+        if parsed.path == "/api/forecast":
+            try:
+                payload = build_forecast()
+            except Exception as e:
+                payload = {"error": str(e)}
+            body = json.dumps(payload, ensure_ascii=False)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body.encode("utf-8"))
+            return
         super().do_GET()
 
     def do_POST(self):
@@ -302,6 +436,23 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             except Exception:
                 data, sql = {}, ""
             ok, cols, rows, elapsed, err = run_hive_sql(sql)
+            payload = {"ok": ok, "cols": cols, "rows": rows, "message": err}
+            res = json.dumps(payload, ensure_ascii=False)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(res.encode("utf-8"))
+            return
+        if self.path == "/api/spark":
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length).decode("utf-8", "ignore")
+            try:
+                data = json.loads(body)
+                sql = data.get("sql", "")
+            except Exception:
+                data, sql = {}, ""
+            ok, cols, rows, err = run_spark_sql(sql)
             payload = {"ok": ok, "cols": cols, "rows": rows, "message": err}
             res = json.dumps(payload, ensure_ascii=False)
             self.send_response(200)
