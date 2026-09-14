@@ -1,0 +1,10 @@
+CREATE TABLE IF NOT EXISTS chargestation.point_record (
+  id STRING,
+  user_id STRING,
+  change STRING,
+  reason STRING,
+  create_time STRING
+)
+ROW FORMAT DELIMITED FIELDS TERMINATED BY '\t'
+NULL DEFINED AS '\\N'
+STORED AS TEXTFILE;

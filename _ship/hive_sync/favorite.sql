@@ -1,0 +1,9 @@
+CREATE TABLE IF NOT EXISTS chargestation.favorite (
+  id STRING,
+  user_id STRING,
+  station_id STRING,
+  create_time STRING
+)
+ROW FORMAT DELIMITED FIELDS TERMINATED BY '\t'
+NULL DEFINED AS '\\N'
+STORED AS TEXTFILE;
