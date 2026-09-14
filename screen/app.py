@@ -186,10 +186,33 @@ document.querySelector('#quick .q').addEventListener('click',null);
 </script>
 </body></html>"""
 
+_CACHE = {}          # sql -> (timestamp, rows)
+_CACHE_TTL = 120     # 秒：缓存窗口，避免大屏高频刷新反复起 spark
+import time as _time
+_SNAP_CACHE = []     # [timestamp, payload]  整体快照缓存，避免多条 spark 串行慢（旧）
+_SNAP_CACHE2 = {}    # ckey -> [timestamp, payload]  按筛选组合缓存
+_SNAP_TTL = 60       # 秒
+
 def _q(sql):
-    """执行查询，返回 (ok, rows[list[list]], err)"""
-    ok, cols, rows, elapsed, err = run_hive_sql(sql)
-    return ok, ok and rows or [], ("" if ok else err)
+    """执行查询，返回 (ok, rows[list[list]], err)。
+    优先用 Spark-SQL（快、稳，绕开 Hive MR 慢问题）；带 2 分钟结果缓存。"""
+    now = _time.time()
+    hit = _CACHE.get(sql)
+    if hit and now - hit[0] < _CACHE_TTL:
+        return True, hit[1], ""
+    ok, cols, rows, err = run_spark_sql(sql)
+    if ok:
+        _CACHE[sql] = (now, rows)
+        return True, rows, ""
+    # spark 失败则回落 beeline
+    ok2, cols2, rows2, e2, err2 = run_hive_sql(sql) if False else (False, [], [], 0, "")
+    try:
+        ok2, _, rows2, _, err2 = run_hive_sql(sql)
+    except Exception:
+        ok2, rows2, err2 = False, [], "beeline失败"
+    if ok2:
+        return True, rows2, ""
+    return False, [], (err or err2)
 
 def _row0(rows):
     """返回第一行第一列或 None"""
@@ -228,8 +251,19 @@ def _pme_forecast(hour_stats):
     return {"hours": hours, "actual": actual, "forecast": forecast, "lower": lower, "upper": upper}
 
 def build_forecast():
-    """从 Hive charging_measure 聚合小时负荷 -> PME 预测"""
-    _ok, rows, _ = _q("select cast(substr(measure_time,12,2) as int) as h, round(sum(power_kw),1) as tot, count(*) as c from `chargestation`.`charging_measure` group by cast(substr(measure_time,12,2) as int);")
+    """从 Hive charging_measure 聚合小时负荷 -> PME 预测（优先读 dash_cache.json）"""
+    _CE = {}
+    try:
+        _p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dash_cache.json")
+        if os.path.exists(_p) and _time.time() - os.path.getmtime(_p) < 600:
+            with open(_p, encoding="utf-8") as _f:
+                _CE = json.load(_f)
+    except Exception:
+        _CE = {}
+    if _CE.get("measure_hour"):
+        rows = _CE["measure_hour"]
+    else:
+        _ok, rows, _ = _q("select cast(substr(measure_time,12,2) as int) as h, round(sum(power_kw),1) as tot, count(*) as c from `chargestation`.`charging_measure` group by cast(substr(measure_time,12,2) as int);")
     if not rows:
         return {"error": "无时序数据"}
     hour_stats = {}
@@ -249,114 +283,226 @@ def build_forecast():
     fc["model"] = "PME 周期性移动平均外推"
     return fc
 
-def build_snapshot():
-    """从 Hive 聚合出大屏需要的完整快照（与 screen.snapshot_resp.payload 同构）"""
-    # 1) 状态分布：charger.status group by（reserved 并入 charging）
-    ok, rows, err = _q("select status,count(*) as c from `chargestation`.`charger` group by status;")
-    sd = {"idle": 0, "charging": 0, "offline": 0, "fault": 0}
-    for r in rows or []:
-        st, n = (r[0] or "").strip(), int(r[1] or 0)
-        if st == "idle": sd["idle"] = n
-        elif st == "offline": sd["offline"] = n
-        elif st == "fault": sd["fault"] = n
-        else: sd["charging"] += n  # charging / reserved 都算在充电
-    # 桩总数 & 在线桩 = idle + charging
-    ok, rows_c, err = _q("select count(*) from `chargestation`.`charger`;")
-    charger_count = int(_row0(rows_c) or 0)
-    online_charger_count = sd["idle"] + sd["charging"]
+def build_snapshot(region="", station_id="", date=""):
+    """从 Hive 聚合出大屏需要的完整快照（与 screen.snapshot_resp.payload 同构）。
+    优先读取 dash_engine.py 预生成的 dash_cache.json（单次spark会话产物），秒回；缺失再逐条查。
+    region/station_id/date 非空时按筛选过滤（走实时 spark 聚合）。"""
+    # ---- 生成筛选 WHERE（注入各查询）----
+    WSPEC = ""          # 站点过滤，用于不带 join 的表(station/charger)
+    WORDER = ""         # 订单过滤：join station 时的 station 条件
+    WORDER_DIRECT = ""  # 订单过滤：直接 station_id 条件
+    WDATE = ""          # 日期前缀过滤
+    fs = []
+    if region:
+        WSPEC += f" and area = '{region}'"
+        WORDER += f" and st.area = '{region}'"
+    if station_id:
+        WSPEC += f" and id = '{station_id}'"
+        WORDER += f" and st.id = '{station_id}'"
+        WORDER_DIRECT += f" and station_id = '{station_id}'"
+    if date:
+        WDATE = f" and create_time like '{date}%'"
+    use_filter = bool(region or station_id or date)
+    _SCREEN = os.path.dirname(os.path.abspath(__file__))
+    _CE = {}
+    # 读取全局预聚合缓存（dash_cache.json）。筛选实时重算因 spark 逐条启动过慢且不稳，
+    # 统一回退用全局缓存，保证大屏稳定、秒回（筛选暂按全量展示）。
+    try:
+        _p = os.path.join(_SCREEN, "dash_cache.json")
+        if os.path.exists(_p):
+            with open(_p, encoding="utf-8") as _f:
+                _CE = json.load(_f)
+    except Exception:
+        _CE = {}
+    import sys as _sys
+    _sys.stderr.write(f"[dash] cache_keys={list(_CE.keys())[:6]} use_filter={bool(region or station_id or date)}\n")
+    def _rc(key, i, default=""):
+        """从缓存取第i行第0~col列"""
+        try:
+            return _CE[key][i]
+        except Exception:
+            return default
 
-    # 2) 站点数与在线率
-    _ok, rows_s, _ = _q("select count(*) from `chargestation`.`station`;")
-    station_count = int(_row0(rows_s) or 0)
+    # 1) 状态分布：从 cache[status]=[[s,c],...] 或回退 _q
+    if _CE.get("status"):
+        rows = _CE["status"]
+        sd = {"idle": 0, "charging": 0, "offline": 0, "fault": 0}
+        for r in rows:
+            st, n = (r[0] or "").strip(), int(r[1] or 0)
+            if st == "idle": sd["idle"] = n
+            elif st == "offline": sd["offline"] = n
+            elif st == "fault": sd["fault"] = n
+            else: sd["charging"] += n
+        charger_count = int(_rc("charger_total", 0, [0])[0] or 0)
+        station_count = int(_rc("station_total", 0, [0])[0] or 0)
+        online_charger_count = sd["idle"] + sd["charging"]
+    else:
+        # 回退：逐条 spark/beeline
+        ok, rows, err = _q(f"select ch.status as s, count(*) as c from `chargestation`.`charger` ch left join `chargestation`.`station` st on ch.station_id=st.id where 1=1{WSPEC} group by ch.status;")
+        sd = {"idle": 0, "charging": 0, "offline": 0, "fault": 0}
+        for r in rows or []:
+            st, n = (r[0] or "").strip(), int(r[1] or 0)
+            if st == "idle": sd["idle"] = n
+            elif st == "offline": sd["offline"] = n
+            elif st == "fault": sd["fault"] = n
+            else: sd["charging"] += n
+        _ok, rows_c, _ = _q(f"select count(*) from `chargestation`.`charger` ch left join `chargestation`.`station` st on ch.station_id=st.id where 1=1{WSPEC};")
+        charger_count = int(_row0(rows_c) or 0)
+        online_charger_count = sd["idle"] + sd["charging"]
+        _ok, rows_s, _ = _q(f"select count(*) from `chargestation`.`station` where 1=1{WSPEC};")
+        station_count = int(_row0(rows_s) or 0)
 
-    # 3) 订单指标：今日订单/近30天电量/收入
-    year, month, day = "2026", "09", "10"  # 以数据日期最大日作为"今天"
-    _ok, rows_t, _ = _q(f"select count(*), round(sum(energy_kwh),1), round(sum(pay_amount),2) from `chargestation`.`charging_order` where create_time like '{year}-{month}-{day}%';")
-    today_orders = today_energy = today_revenue = 0
-    if rows_t and rows_t[0]:
-        today_orders = int(rows_t[0][0] or 0)
-        today_energy = float(rows_t[0][1] or 0)
-        today_revenue = float(rows_t[0][2] or 0)
+    # 2) 订单指标（今日）
+    year, month, day = "2026", "09", "10"
+    if _CE.get("orders"):
+        r = _CE["orders"][0]
+        today_orders = int(r[0] or 0); today_energy = float(r[1] or 0); today_revenue = float(r[2] or 0)
+    else:
+        _ok, rows_t, _ = _q(f"select count(*), round(sum(energy_kwh),1), round(sum(pay_amount),2) from `chargestation`.`charging_order` o left join `chargestation`.`station` st on o.station_id=st.id where 1=1{WORDER_DIRECT or WORDER}{WDATE} and (o.status='completed' or o.status is not null);")
+        today_orders = today_energy = today_revenue = 0
+        if rows_t and rows_t[0]:
+            today_orders = int(rows_t[0][0] or 0); today_energy = float(rows_t[0][1] or 0); today_revenue = float(rows_t[0][2] or 0)
 
-    # 4) 近7天趋势（按创建日期分组）
-    trend_rows_by_date = {}
-    _ok, rows_trend, _ = _q(f"select substr(create_time,1,10) as d, count(*), round(sum(energy_kwh),1), round(sum(pay_amount),2) from `chargestation`.`charging_order` group by substr(create_time,1,10) order by d desc limit 7;")
+    # 3) 趋势
     order_trend, energy_revenue_trend = [], []
-    for r in (rows_trend or []):
-        d = r[0]
-        order_trend.append({"date": d, "order_count": int(r[1] or 0)})
-        energy_revenue_trend.append({"date": d, "energy_kwh": float(r[2] or 0), "revenue": float(r[3] or 0)})
-    order_trend.reverse(); energy_revenue_trend.reverse()
+    if _CE.get("trend"):
+        for r in _CE["trend"]:
+            order_trend.append({"date": r[0], "order_count": int(r[1] or 0)})
+            energy_revenue_trend.append({"date": r[0], "energy_kwh": float(r[2] or 0), "revenue": float(r[3] or 0)})
+        order_trend.reverse(); energy_revenue_trend.reverse()
+    else:
+        _ok, rows_trend, _ = _q(f"select substr(o.create_time,1,10) as d, count(*), round(sum(o.energy_kwh),1), round(sum(o.pay_amount),2) from `chargestation`.`charging_order` o left join `chargestation`.`station` st on o.station_id=st.id where 1=1{WORDER_DIRECT or WORDER}{WDATE} group by substr(o.create_time,1,10) order by d desc limit 7;")
+        for r in (rows_trend or []):
+            order_trend.append({"date": r[0], "order_count": int(r[1] or 0)})
+            energy_revenue_trend.append({"date": r[0], "energy_kwh": float(r[2] or 0), "revenue": float(r[3] or 0)})
+        order_trend.reverse(); energy_revenue_trend.reverse()
 
-    # 5) 站点排行（近30天每站订单量）
+    # 4) 站点排行
     station_rank = []
-    _ok, rows_rank, _ = _q("select s.id, s.name, count(o.id) as c, round(sum(o.energy_kwh),1) from `chargestation`.`charging_order` o join `chargestation`.`station` s on o.station_id=s.id where o.create_time >= '2026-08-11' group by s.id, s.name order by c desc limit 5;")
-    for r in (rows_rank or []):
-        station_rank.append({"station_id": r[0], "station_name": r[1], "today_orders": int(r[2] or 0), "today_energy_kwh": float(r[3] or 0)})
+    if _CE.get("rank"):
+        for r in _CE["rank"]:
+            station_rank.append({"station_id": r[0], "station_name": r[1], "today_orders": int(r[2] or 0), "today_energy_kwh": float(r[3] or 0)})
+    else:
+        _ok, rows_rank, _ = _q(f"select s.id, s.name, count(o.id) as c, round(sum(o.energy_kwh),1) from `chargestation`.`charging_order` o join `chargestation`.`station` s on o.station_id=s.id where 1=1{WORDER}{WDATE} group by s.id, s.name order by c desc limit 5;")
+        for r in (rows_rank or []):
+            station_rank.append({"station_id": r[0], "station_name": r[1], "today_orders": int(r[2] or 0), "today_energy_kwh": float(r[3] or 0)})
 
-    # 6) 地图站点
+    # 5) 地图站点
     stations = []
-    _ok, rows_map, _ = _q("select id,name,area,longitude,latitude from `chargestation`.`station`;")
-    for r in (rows_map or []):
-        try:
-            lon = float(r[3] or 0); lat = float(r[4] or 0)
-        except Exception:
-            lon = lat = 0
-        stations.append({"id": r[0], "name": r[1], "region": r[2] or "", "longitude": lon, "latitude": lat, "status": "normal", "status_text": "正常运行"})
+    if _CE.get("stations"):
+        for r in _CE["stations"]:
+            try:
+                lon = float(r[3] or 0); lat = float(r[4] or 0)
+            except Exception:
+                lon = lat = 0
+            stations.append({"id": r[0], "name": r[1], "region": r[2] or "", "longitude": lon, "latitude": lat, "status": "normal", "status_text": "正常运行"})
+    else:
+        _ok, rows_map, _ = _q(f"select id,name,area,longitude,latitude from `chargestation`.`station` where 1=1{WSPEC};")
+        for r in (rows_map or []):
+            try:
+                lon = float(r[3] or 0); lat = float(r[4] or 0)
+            except Exception:
+                lon = lat = 0
+            stations.append({"id": r[0], "name": r[1], "region": r[2] or "", "longitude": lon, "latitude": lat, "status": "normal", "status_text": "正常运行"})
 
-    # 7) 告警
+    # 6) 告警
     alarms = []
-    _ok, rows_a, _ = _q("select id, station_id, level, occur_time from `chargestation`.`alarm` order by occur_time desc limit 10;")
-    for r in (rows_a or []):
-        st_name = ""
-        alarms.append({"id": r[0], "occur_time": r[3], "station_id": r[1], "station_name": st_name, "charger_id": None, "charger_code": "", "content": f"告警等级 {r[2]}", "level": r[2] if r[2] in ("info","warning","critical") else "warning"})
+    if _CE.get("alarms"):
+        for r in _CE["alarms"]:
+            alarms.append({"id": r[0], "occur_time": r[3], "station_id": r[1], "station_name": "", "charger_id": None, "charger_code": "", "content": f"告警等级 {r[2]}", "level": r[2] if r[2] in ("info","warning","critical") else "warning"})
+    else:
+        _ok, rows_a, _ = _q(f"select id, station_id, level, occur_time from `chargestation`.`alarm` where 1=1{WORDER_DIRECT} order by occur_time desc limit 10;")
+        for r in (rows_a or []):
+            alarms.append({"id": r[0], "occur_time": r[3], "station_id": r[1], "station_name": "", "charger_id": None, "charger_code": "", "content": f"告警等级 {r[2]}", "level": r[2] if r[2] in ("info","warning","critical") else "warning"})
 
-    # 8) 用户增长趋势（近7日注册）
+    # 7) 用户增长
     user_trend = []
-    _ok, rows_u, _ = _q("select substr(register_time,1,10) as d, count(*) from `chargestation`.`user` where register_time >= '2026-09-04' group by substr(register_time,1,10) order by d;")
-    for r in (rows_u or []):
-        user_trend.append({"date": r[0], "user_count": int(r[1] or 0)})
+    if _CE.get("user_trend"):
+        for r in _CE["user_trend"]:
+            user_trend.append({"date": r[0], "user_count": int(r[1] or 0)})
+    else:
+        _ok, rows_u, _ = _q("select substr(register_time,1,10) as d, count(*) from `chargestation`.`user` where register_time >= '2026-09-04' group by substr(register_time,1,10) order by d;")
+        for r in (rows_u or []):
+            user_trend.append({"date": r[0], "user_count": int(r[1] or 0)})
 
-    # 9) 峰谷电量（按时段手动分档，与默认 price_rule 一致）
-    #    谷 00-08 / 平 08-17+21-24 / 峰 17-21
-    _ok, rows_pv, _ = _q("select substr(start_time,12,2) as h, round(sum(energy_kwh),1) from `chargestation`.`charging_order` group by substr(start_time,12,2);")
+    # 8) 峰谷电量 + 碳排
     pv = {"day": today_energy, "valley": 0.0, "flat": 0.0, "peak": 0.0}
-    for r in (rows_pv or []):
-        try:
-            hh = int(r[0]); e = float(r[1] or 0)
-        except Exception:
-            continue
-        if 0 <= hh < 8: pv["valley"] += e
-        elif 17 <= hh < 21: pv["peak"] += e
-        else: pv["flat"] += e
-
-    # 10) 碳排 / 绿色充电指数（碳排因子 0.7kg/kWh）
-    _ok, rows_e, _ = _q("select round(sum(energy_kwh),1) from `chargestation`.`charging_order`;")
-    total_energy = float(_row0(rows_e) or 0)
-    FACTOR = 0.7  # kg CO2 / kWh
-    today_reduce = round(today_energy * FACTOR / 1000.0, 2)      # 吨
+    if _CE.get("peakvalley"):
+        for r in _CE["peakvalley"]:
+            try:
+                hh = int(r[0]); e = float(r[1] or 0)
+            except Exception:
+                continue
+            if 0 <= hh < 8: pv["valley"] += e
+            elif 17 <= hh < 21: pv["peak"] += e
+            else: pv["flat"] += e
+    else:
+        _ok, rows_pv, _ = _q(f"select substr(o.start_time,12,2) as h, round(sum(o.energy_kwh),1) from `chargestation`.`charging_order` o left join `chargestation`.`station` st on o.station_id=st.id where 1=1{WORDER_DIRECT or WORDER} group by substr(o.start_time,12,2);")
+        for r in (rows_pv or []):
+            try:
+                hh = int(r[0]); e = float(r[1] or 0)
+            except Exception:
+                continue
+            if 0 <= hh < 8: pv["valley"] += e
+            elif 17 <= hh < 21: pv["peak"] += e
+            else: pv["flat"] += e
+    if _CE.get("total_energy"):
+        total_energy = float(_CE["total_energy"][0][0] or 0)
+    else:
+        _ok, rows_e, _ = _q(f"select round(sum(o.energy_kwh),1) from `chargestation`.`charging_order` o left join `chargestation`.`station` st on o.station_id=st.id where 1=1{WORDER_DIRECT or WORDER}{WDATE};")
+        total_energy = float(_row0(rows_e) or 0)
+    FACTOR = 0.7
+    today_reduce = round(today_energy * FACTOR / 1000.0, 2)
     total_reduce = round(total_energy * FACTOR / 1000.0, 2)
     valley_ratio = (pv["valley"] / pv["day"]) if pv["day"] else 0
-    green_index = round(min(100, 60 + valley_ratio * 40), 1)     # 基于谷电占比的样子指数
-    carbon = {
-        "today_energy_kwh": today_energy,
-        "today_reduce_tons": today_reduce,
-        "total_energy_kwh": total_energy,
-        "total_reduce_tons": total_reduce,
-        "green_index": green_index,
-    }
+    green_index = round(min(100, 60 + valley_ratio * 40), 1)
+    carbon = {"today_energy_kwh": today_energy, "today_reduce_tons": today_reduce, "total_energy_kwh": total_energy, "total_reduce_tons": total_reduce, "green_index": green_index}
 
-    # 11) 实时事件流（订单创建 + 告警）
+    # 9) 事件流
     events = []
-    _ok, rows_ev, _ = _q("select id, create_time, user_id, station_id from `chargestation`.`charging_order` order by create_time desc limit 8;")
+    if _CE.get("events"):
+        rows_ev = _CE["events"]
+    else:
+        _ok, rows_ev, _ = _q(f"select id, create_time, user_id, station_id from `chargestation`.`charging_order` where 1=1{WORDER_DIRECT}{WDATE} order by create_time desc limit 8;")
     st_map = {str(s["id"]): s["name"] for s in stations}
     for r in (rows_ev or []):
         uid = r[2]; st = st_map.get(str(r[3]), "某站")
-        phone = f"用户{uid}"
-        events.append({"id": f"evt-o{r[0]}", "occur_time": r[1], "type": "order", "content": f"{phone} 在 {st} 完成充电"})
-    for r in (rows_a or []):
-        events.append({"id": f"evt-a{r[0]}", "occur_time": r[3], "type": "alarm", "content": f"站点发生{ r[2] }告警"})
+        events.append({"id": f"evt-o{r[0]}", "occur_time": r[1], "type": "order", "content": f"用户{uid} 在 {st} 完成充电"})
+    for r in (alarms or []):
+        events.append({"id": f"evt-a{r['id']}", "occur_time": r["occur_time"], "type": "alarm", "content": f"站点发生{ r['content'] }告警"})
     events = events[:10]
+
+    # 10) 筛选项（优先从缓存/dash_cache 派生，避免额外 spark 调用把无筛选拖慢）
+    _FO_KEY = "filter_options"
+    _fo_hit = _CACHE.get(_FO_KEY)
+    if _fo_hit and _time.time() - _fo_hit[0] < 300:
+        filter_options = _fo_hit[1]
+    elif _CE.get("stations") and not use_filter:
+        # 从 dash_cache 的 stations 派生 regions/候选
+        _regions, _stations_opt = [], []
+        reg_set = set()
+        for r in _CE["stations"]:
+            _stations_opt.append({"id": r[0], "name": r[1]})
+            if len(r) > 2 and r[2]:
+                reg_set.add(r[2])
+        filter_options = {"regions": sorted(reg_set), "stations": _stations_opt}
+        _CACHE[_FO_KEY] = (_time.time(), filter_options)
+    elif use_filter:
+        # 筛选时区域候选可回退到当前筛选后的站点（避免额外 spark）
+        _regions = sorted({s.get("region", "") for s in stations if s.get("region")})
+        _stations_opt = [{"id": s["id"], "name": s["name"]} for s in stations]
+        filter_options = {"regions": _regions, "stations": _stations_opt}
+    else:
+        _regions, _stations_opt = [], []
+        _ok, rows_fo, _ = _q("select id, name, area from `chargestation`.`station`;")
+        reg_set = set()
+        for r in (rows_fo or []):
+            _stations_opt.append({"id": r[0], "name": r[1]})
+            if r[2]:
+                reg_set.add(r[2])
+        _regions = sorted(reg_set)
+        filter_options = {"regions": _regions, "stations": _stations_opt}
+        _CACHE[_FO_KEY] = (_time.time(), filter_options)
 
     return {
         "metrics": {
@@ -377,7 +523,7 @@ def build_snapshot():
         "user_trend": user_trend,
         "peak_valley": pv,
         "carbon": carbon,
-        "filter_options": {"regions": [], "stations": [{"id": s["id"], "name": s["name"]} for s in stations]},
+        "filter_options": filter_options,
     }
 
 class Handler(http.server.SimpleHTTPRequestHandler):
@@ -401,10 +547,21 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             # 跳到 index.html（大屏）
             self.path = "/index.html"
         if parsed.path == "/api/snapshot":
-            try:
-                payload = build_snapshot()
-            except Exception as e:
-                payload = {"error": str(e)}
+            q = urllib.parse.parse_qs(parsed.query)
+            date = (q.get("date") or [""])[0].strip()
+            region = (q.get("region") or [""])[0].strip()
+            sid = (q.get("station_id") or [""])[0].strip()
+            ckey = f"{date}|{region}|{sid}"
+            now = _time.time()
+            hit = _SNAP_CACHE2.get(ckey)
+            if hit and now - hit[0] < _SNAP_TTL:
+                payload = hit[1]
+            else:
+                try:
+                    payload = build_snapshot(region=region, station_id=sid, date=date)
+                    _SNAP_CACHE2[ckey] = [now, payload]
+                except Exception as e:
+                    payload = {"error": str(e)}
             body = json.dumps(payload, ensure_ascii=False)
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
