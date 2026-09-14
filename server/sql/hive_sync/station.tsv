@@ -1,0 +1,30 @@
+1	市中心快充站	解放路100号	商业区	123.431	41.8057	12	92.0	0.8	5.0	00:00-24:00	["convenience_store", "wifi", "rain_shelter"]	self_run	\N	0	active
+2	高新软件园站	创新路2号	高新区	123.4587	41.7423	10	90.0	0.6	0.0	00:00-24:00	["washroom", "rest_area", "underground_parking"]	self_run	\N	0	active
+3	大学城充电站	文华街33号	大学城	123.4123	41.7669	10	100.0	0.5	0.0	06:00-23:00	["washroom", "convenience_store"]	partner	1	0	active
+4	老城区慢充站	中山巷8号	老城区	123.3958	41.8121	8	100.0	0.4	2.0	00:00-24:00	[]	self_run	\N	0	active
+5	滨河换电综合站	滨河大道66号	滨河区	123.4776	41.789	10	100.0	0.7	0.0	00:00-24:00	["rest_area", "wifi", "rain_shelter", "underground_parking"]	self_run	\N	1	active
+6	城东新区站	科技大道一号	城东区	123.521	41.74	8	100.0	0.65	0.0	00:00-24:00	["washroom", "convenience_store", "wifi"]	partner	2	0	active
+7	高铁枢纽北站	北站广场东路12号	新城区	123.565	41.815	14	100.0	0.75	4.0	05:00-24:00	["rest_area", "convenience_store", "rain_shelter", "underground_parking"]	self_run	\N	0	active
+8	智慧物流园区站	物流大道88号	物流园	123.39	41.77	6	100.0	0.55	0.0	00:00-24:00	["washroom", "rest_area"]	partner	3	0	active
+9	会展中心站	会展大道2号	新城区	123.54	41.78	10	100.0	0.72	6.0	00:00-24:00	["wifi", "service_center", "rain_shelter"]	self_run	\N	0	active
+10	临港工业园站	临港大道55号	临港区	123.6	41.7	8	100.0	0.6	0.0	07:00-22:00	["washroom", "rest_area", "convenience_store"]	self_run	\N	0	active
+11	生态田园度假站	郊野公园南门	郊野	123.35	41.88	6	100.0	0.5	0.0	08:00-20:00	["altitude_nearby", "rest_area"]	self_run	\N	0	active
+12	双子塔超充站	商务中环118号	商务区	123.41	41.815	16	100.0	0.9	8.0	00:00-24:00	["coffee_shop", "wifi", "rest_area", "underground_parking"]	self_run	\N	0	active
+13	徐汇滨江超充站	徐汇区滨江大道88号	上海·徐汇	121.463	31.191	14	100.0	0.85	6.0	00:00-24:00	["wifi", "rest_area", "rain_shelter", "underground_parking"]	self_run	\N	0	active
+14	南山科技园站	南山区科技园南区	深圳·南山	113.941	22.547	10	100.0	0.8	5.0	00:00-24:00	["washroom", "convenience_store", "wifi"]	partner	2	0	active
+15	天河区商圈站	天河区天河路商圈	广州·天河	113.323	23.128	8	100.0	0.78	7.0	00:00-24:00	["coffee_shop", "rest_area", "underground_parking"]	self_run	\N	0	active
+16	西湖文创园站	西湖区文一西路	杭州·西湖	120.152	30.245	6	100.0	0.7	0.0	09:00-22:00	["washroom", "wifi", "rest_area"]	self_run	\N	0	active
+17	天府软件园站	天府大道南段	成都·天府新区	104.077	30.505	10	100.0	0.75	3.0	00:00-24:00	["washroom", "rest_area", "convenience_store"]	partner	1	0	active
+18	光谷软件园站	洪山区光谷大道	武汉·光谷	114.414	30.489	8	100.0	0.72	0.0	00:00-24:00	["rest_area", "wifi"]	self_run	\N	0	active
+19	江北新区站	江北新区浦滨路	南京·江北	118.707	32.156	6	100.0	0.68	0.0	00:00-24:00	["convenience_store", "rain_shelter"]	self_run	\N	0	active
+20	高新保税区站	高新区锦业路	西安·高新	108.905	34.228	6	100.0	0.66	0.0	07:00-22:00	["washroom", "rest_area"]	self_run	\N	0	active
+21	陆家嘴金融城站	浦东新区陆家嘴环路	上海·浦东	121.505	31.24	16	100.0	0.95	10.0	00:00-24:00	["coffee_shop", "wifi", "underground_parking"]	self_run	\N	0	active
+22	朝阳CBD超充站	朝阳区建国门外大街	北京·朝阳	116.461	39.908	18	100.0	0.9	9.0	00:00-24:00	["wifi", "coffee_shop", "underground_parking"]	partner	4	0	active
+23	十里河物流园站	朝阳区十里河桥	北京·朝阳	116.458	39.862	8	100.0	0.6	0.0	00:00-24:00	["washroom", "rest_area"]	third_party	5	1	active
+24	海淀中关村站	海淀区中关村大街	北京·海淀	116.313	39.975	12	100.0	0.82	6.0	00:00-23:59	["rest_area", "wifi", "convenience_store"]	self_run	\N	0	active
+25	苏州工业园区站	工业园区金鸡湖大道	江苏苏州·园区	120.674	31.315	10	100.0	0.72	0.0	00:00-24:00	["washroom", "rest_area", "convenience_store"]	partner	4	0	active
+26	天津滨海新区站	滨海新区核心区	天津·滨海	117.654	39.062	6	100.0	0.7	2.0	00:00-24:00	["convenience_store", "rain_shelter"]	self_run	\N	0	active
+27	重庆两江新区站	两江新区金开大道	重庆·两江	106.537	29.682	8	100.0	0.68	0.0	00:00-24:00	["rest_area", "wifi"]	partner	6	0	active
+28	郑州东站站	金水区郑东新区	河南郑州·金水	113.753	34.767	10	100.0	0.65	4.0	05:00-24:00	["washroom", "convenience_store"]	third_party	5	0	active
+29	合肥政务区站	蜀山区潜山路	安徽合肥·蜀山	117.227	31.821	6	100.0	0.62	0.0	00:00-24:00	["rest_area", "rain_shelter"]	self_run	\N	0	active
+30	长沙梅溪湖站	岳麓区梅溪湖路	湖南长沙·岳麓	112.891	28.197	8	100.0	0.66	3.0	00:00-24:00	["wifi", "rest_area"]	partner	6	0	active

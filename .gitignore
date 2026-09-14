@@ -52,6 +52,12 @@ node_modules/
 package-lock.json
 screen/vendor/
 
+# ===== 临时传输/暂存目录（scp 中转用，勿提交）=====
+_ship/
+
+# ===== Hive 灌数的大 tsv 产物（可由 _export_hive.py 从 charge.db 重新生成）=====
+hive_sync/*.tsv
+
 # ===== IDE / 编辑器 =====
 .vscode/
 .idea/
