@@ -50,7 +50,8 @@ venv/
 # ===== Node / 前端（如大屏引入本地包）=====
 node_modules/
 package-lock.json
-screen/vendor/
+screen/vendor/*
+!screen/vendor/echarts.min.js
 
 # ===== 临时传输/暂存目录（scp 中转用，勿提交）=====
 _ship/
