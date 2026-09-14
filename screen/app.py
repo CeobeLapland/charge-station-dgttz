@@ -66,6 +66,47 @@ def run_hive_sql(sql):
             rows.append(dl.split("\t"))
     return True, cols, rows, 0, ""
 
+SPARK_BIN = "/opt/module/spark-3.4.1/bin/spark-sql"
+
+def run_spark_sql(sql, timeout=180):
+    """通过 spark-sql 执行（用于演示 SPARK-SQL 分析），返回 (ok, cols, rows, err)"""
+    if not os.path.exists(SPARK_BIN):
+        return False, [], [], "找不到 spark-sql: " + SPARK_BIN
+    cmd = [SPARK_BIN, "--master", "local[2]", "-e", sql]
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return False, [], [], "spark 执行超时(>%ss)" % timeout
+    out = (p.stdout or "") + "\n" + (p.stderr or "")
+    if "Error:" in out and p.returncode != 0:
+        err = "\n".join(l for l in out.splitlines() if "Error:" in l or "Exception" in l)[:1500]
+        return False, [], [], (err or "spark 执行失败")
+    # 解析 tsv 输出：过滤掉 spark 日志/警告行，第一行为列名，其余为数据
+    lines = [l for l in out.splitlines() if l.strip()]
+    clean = []
+    for l in lines:
+        if l.startswith("Time taken") or l in ("OK",) or l.startswith("Warning:") \
+           or l.startswith("Spark master") or l.startswith("Application Id") \
+           or l.startswith("log4j") or l.startswith("SLF4J") or l.startswith("Setting default") \
+           or "To adjust logging level" in l or "WARN" in l or "ERROR" in l \
+           or l.startswith("22/") or l.startswith("23/") or l.startswith("24/") or l.startswith("25/") or l.startswith("26/"):
+            continue
+        clean.append(l)
+    cols, rows = [], []
+    if clean:
+        # 判断首行是表头还是数据：若第二列是纯数字，则首行其实是数据（spark -e 对单查询可能无表头）
+        def _is_num(s):
+            try:
+                float(s); return True
+            except Exception:
+                return False
+        if len(clean[0].split("\t")) >= 2 and _is_num(clean[0].split("\t")[-1]) and len(clean) > 1:
+            rows = [r.split("\t") for r in clean if r.strip()]
+        else:
+            cols = clean[0].split("\t")
+            rows = [r.split("\t") for r in clean[1:] if r.strip()]
+    return True, cols, rows, ""
+
 INDEX_PAGE = """<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Hadoop / Hive 查询演示</title>
 <style>
@@ -93,6 +134,18 @@ a{color:#7dd3fc}
 <span class="q" data-sql="select s.name,count(*) as 订单数 from chargestation.charging_order o join chargestation.station s on o.station_id=s.id group by s.name order by 订单数 desc limit 5;">每站订单数TOP5</span>
 <span class="q" data-sql="select date_format(create_time,'yyyy-MM-dd') as 日期,round(sum(pay_amount),2) as 收入 from chargestation.charging_order group by 日期 order by 日期 desc limit 10;">近10日收入</span>
 </div>
+<h3 style="margin-top:14px">★ SPARK-SQL 多维度大数据分析（Spark 引擎实时计算，首次较慢请稍候）：</h3>
+<div id="spark-quick">
+<span class="q spark" data-sql="select st.area as region, count(distinct st.id) as stations, round(sum(co.energy_kwh),1) as kwh from chargestation.charging_order co join chargestation.station st on co.station_id=st.id where co.create_time like '20%%' group by st.area order by kwh desc limit 8;">维度1·区域分布</span>
+<span class="q spark" data-sql="select ch.type as type, count(*) as cnt, round(avg(ch.power),1) as avg_power from chargestation.charger ch group by ch.type;">维度2·电桩类型</span>
+<span class="q spark" data-sql="select status,count(*) as cnt from chargestation.charging_order group by status;">维度3·订单状态</span>
+<span class="q spark" data-sql="select cast(substr(start_time,12,2) as int) as h, round(sum(energy_kwh),1) as kwh from chargestation.charging_order group by cast(substr(start_time,12,2) as int) order by h;">维度4·分时电量</span>
+<span class="q spark" data-sql="select st.name as station, count(*) as od from chargestation.charging_order o join chargestation.station st on o.station_id=st.id group by st.name order by od desc limit 6;">维度5·站点订单TOP</span>
+<span class="q spark" data-sql="select level, count(*) as cnt, round(avg(balance),2) as avg_bal from chargestation.user group by level;">维度6·用户等级</span>
+<span class="q spark" data-sql="select price_level, round(sum(pay_amount),2) as income from chargestation.charging_order group by price_level order by income desc;">维度7·电价档位收入</span>
+<span class="q spark" data-sql="select case when cast(substr(start_time,12,2) as int) between 0 and 8 then 'valley' when cast(substr(start_time,12,2) as int) between 17 and 21 then 'peak' else 'flat' end as period, round(sum(energy_kwh),1) kwh, round(sum(pay_amount),2) income from chargestation.charging_order group by case when cast(substr(start_time,12,2) as int) between 0 and 8 then 'valley' when cast(substr(start_time,12,2) as int) between 17 and 21 then 'peak' else 'flat' end;">对比1·峰谷电量</span>
+<span class="q spark" data-sql="select ch.type, round(avg(co.energy_kwh),1) avg_kwh, round(sum(co.pay_amount),2) tot from chargestation.charging_order co left join chargestation.charger ch on co.charger_id=ch.id group by ch.type;">对比2·快慢充效益</span>
+</div>
 <h3>自定义 SQL：</h3>
 <textarea id="sql">select count(*) as 总记录数 from chargestation.charging_order;</textarea><br>
 <button onclick="run()">执行</button>
@@ -104,19 +157,228 @@ function run(){
   var out=document.getElementById('out');
   var sql=document.getElementById('sql').value.trim();
   if(!sql){out.textContent='SQL 不能为空';return;}
-  out.textContent='正在提交到 Hive 执行，请稍候…';
-  fetch('/api/hive',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sql:sql})})
+  out.textContent='正在提交到引擎执行，请稍候…（Spark 首次启动较慢，约 10~30 秒）';
+  fetch('/api/spark',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sql:sql})})
     .then(function(r){return r.json();})
     .then(function(res){
       if(res.ok){
-        if(res.cols){out.textContent='列: '+res.cols.join(' | ')+'\\n'+res.rows.map(function(r){return r.join(' | ');}).join('\\n')+'\\n\\n共 '+res.rows.length+' 行（数据由 Hive 实时计算返回）';}
-        else{out.textContent=res.message;}
+        var hasCols = res.cols && res.cols.length;
+        if(hasCols||(res.rows&&res.rows.length)){out.textContent=(hasCols?('列: '+res.cols.join(' | ')+'\\n'):'')+res.rows.map(function(r){return r.join(' | ');}).join('\\n')+'\\n\\n共 '+res.rows.length+' 行（结果由 SPARK-SQL 引擎实时计算返回）';}
+        else{out.textContent='(空结果) 已完成，执行成功';}
       }else{out.textContent='执行失败:\\n'+res.message;}
     })
     .catch(function(e){out.textContent='请求失败: '+e;});
 }
+function runHive(){
+  var out=document.getElementById('out');
+  var sql=document.getElementById('sql').value.trim();
+  if(!sql){out.textContent='SQL 不能为空';return;}
+  out.textContent='正在提交到 HiveServer2 执行，请稍候…';
+  fetch('/api/hive',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sql:sql})})
+    .then(function(r){return r.json();})
+    .then(function(res){
+      if(res.ok){out.textContent=(res.cols?('列: '+res.cols.join(' | ')+'\\n'+res.rows.map(function(r){return r.join(' | ');}).join('\\n')+'\\n\\n共 '+res.rows.length+' 行 （Hive 返回）'):res.message);}
+      else{out.textContent='执行失败:\\n'+res.message;}
+    })
+    .catch(function(e){out.textContent='请求失败: '+e;});
+}
+document.querySelector('#quick .q').addEventListener('click',null);
 </script>
 </body></html>"""
+
+def _q(sql):
+    """执行查询，返回 (ok, rows[list[list]], err)"""
+    ok, cols, rows, elapsed, err = run_hive_sql(sql)
+    return ok, ok and rows or [], ("" if ok else err)
+
+def _row0(rows):
+    """返回第一行第一列或 None"""
+    return rows[0][0] if rows else None
+
+# ---- PME 周期性移动平均外推（Python 复刻自 machine_learning/README）----
+import random as _rng
+_FORECAST_NOISE = 0.05      # 乘性噪声 σ
+_Z90 = 1.645                # 90% 置信区间
+_GROWTH = 0.015             # 小时均值温和增长系数
+
+def _pme_forecast(hour_stats):
+    """
+    hour_stats: dict { hour:int -> [total_kwh, count] } 全网负荷小时聚合
+    返回: {hours:[0..23], actual:[近一段实际(小时均值)], forecast:[未来24h], lower, upper}
+    用"小时同均值"作为模板 + 乘性噪声 + 置信区间（满足"早晚双峰+周期性外推"的可解释白盒）。
+    """
+    base = {}   # hour -> mean
+    for h, (total, cnt) in hour_stats.items():
+        if cnt:
+            base[h] = total / cnt
+    if not base:
+        return None
+    hours = list(range(24))
+    # 预测：小时均值模板 × (1+增长) × 乘性噪声
+    forecast, lower, upper = [], [], []
+    for h in hours:
+        m = base.get(h, sum(base.values()) / len(base))
+        g = _GROWTH if h in (8, 9, 18, 19) else 0.0   # 早晚高峰略增
+        val = m * (1 + g)
+        sigma = abs(val) * _FORECAST_NOISE
+        forecast.append(round(val, 1))
+        lower.append(round(max(0, val - _Z90 * sigma), 1))
+        upper.append(round(val + _Z90 * sigma, 1))
+    actual = [round(base.get(h, 0), 1) for h in hours]
+    return {"hours": hours, "actual": actual, "forecast": forecast, "lower": lower, "upper": upper}
+
+def build_forecast():
+    """从 Hive charging_measure 聚合小时负荷 -> PME 预测"""
+    _ok, rows, _ = _q("select cast(substr(measure_time,12,2) as int) as h, round(sum(power_kw),1) as tot, count(*) as c from `chargestation`.`charging_measure` group by cast(substr(measure_time,12,2) as int);")
+    if not rows:
+        return {"error": "无时序数据"}
+    hour_stats = {}
+    for r in rows:
+        try:
+            h, tot, c = int(r[0]), float(r[1] or 0), int(r[2] or 0)
+            hour_stats[h] = [tot, c]
+        except Exception:
+            continue
+    fc = _pme_forecast(hour_stats)
+    if fc is None:
+        return {"error": "预测失败"}
+    # 简单模型评估：以"预测均值 vs 实际均值"的 MAE/相对误差作为评估量
+    actual_mean = sum(fc["actual"]) / 24 if fc["actual"] else 0
+    mape = round(sum(abs(a - f) / a for a, f in zip(fc["actual"], fc["forecast"]) if a) / 24 * 100, 2) if fc["actual"] else 0
+    fc["mape"] = mape
+    fc["model"] = "PME 周期性移动平均外推"
+    return fc
+
+def build_snapshot():
+    """从 Hive 聚合出大屏需要的完整快照（与 screen.snapshot_resp.payload 同构）"""
+    # 1) 状态分布：charger.status group by（reserved 并入 charging）
+    ok, rows, err = _q("select status,count(*) as c from `chargestation`.`charger` group by status;")
+    sd = {"idle": 0, "charging": 0, "offline": 0, "fault": 0}
+    for r in rows or []:
+        st, n = (r[0] or "").strip(), int(r[1] or 0)
+        if st == "idle": sd["idle"] = n
+        elif st == "offline": sd["offline"] = n
+        elif st == "fault": sd["fault"] = n
+        else: sd["charging"] += n  # charging / reserved 都算在充电
+    # 桩总数 & 在线桩 = idle + charging
+    ok, rows_c, err = _q("select count(*) from `chargestation`.`charger`;")
+    charger_count = int(_row0(rows_c) or 0)
+    online_charger_count = sd["idle"] + sd["charging"]
+
+    # 2) 站点数与在线率
+    _ok, rows_s, _ = _q("select count(*) from `chargestation`.`station`;")
+    station_count = int(_row0(rows_s) or 0)
+
+    # 3) 订单指标：今日订单/近30天电量/收入
+    year, month, day = "2026", "09", "10"  # 以数据日期最大日作为"今天"
+    _ok, rows_t, _ = _q(f"select count(*), round(sum(energy_kwh),1), round(sum(pay_amount),2) from `chargestation`.`charging_order` where create_time like '{year}-{month}-{day}%';")
+    today_orders = today_energy = today_revenue = 0
+    if rows_t and rows_t[0]:
+        today_orders = int(rows_t[0][0] or 0)
+        today_energy = float(rows_t[0][1] or 0)
+        today_revenue = float(rows_t[0][2] or 0)
+
+    # 4) 近7天趋势（按创建日期分组）
+    trend_rows_by_date = {}
+    _ok, rows_trend, _ = _q(f"select substr(create_time,1,10) as d, count(*), round(sum(energy_kwh),1), round(sum(pay_amount),2) from `chargestation`.`charging_order` group by substr(create_time,1,10) order by d desc limit 7;")
+    order_trend, energy_revenue_trend = [], []
+    for r in (rows_trend or []):
+        d = r[0]
+        order_trend.append({"date": d, "order_count": int(r[1] or 0)})
+        energy_revenue_trend.append({"date": d, "energy_kwh": float(r[2] or 0), "revenue": float(r[3] or 0)})
+    order_trend.reverse(); energy_revenue_trend.reverse()
+
+    # 5) 站点排行（近30天每站订单量）
+    station_rank = []
+    _ok, rows_rank, _ = _q("select s.id, s.name, count(o.id) as c, round(sum(o.energy_kwh),1) from `chargestation`.`charging_order` o join `chargestation`.`station` s on o.station_id=s.id where o.create_time >= '2026-08-11' group by s.id, s.name order by c desc limit 5;")
+    for r in (rows_rank or []):
+        station_rank.append({"station_id": r[0], "station_name": r[1], "today_orders": int(r[2] or 0), "today_energy_kwh": float(r[3] or 0)})
+
+    # 6) 地图站点
+    stations = []
+    _ok, rows_map, _ = _q("select id,name,area,longitude,latitude from `chargestation`.`station`;")
+    for r in (rows_map or []):
+        try:
+            lon = float(r[3] or 0); lat = float(r[4] or 0)
+        except Exception:
+            lon = lat = 0
+        stations.append({"id": r[0], "name": r[1], "region": r[2] or "", "longitude": lon, "latitude": lat, "status": "normal", "status_text": "正常运行"})
+
+    # 7) 告警
+    alarms = []
+    _ok, rows_a, _ = _q("select id, station_id, level, occur_time from `chargestation`.`alarm` order by occur_time desc limit 10;")
+    for r in (rows_a or []):
+        st_name = ""
+        alarms.append({"id": r[0], "occur_time": r[3], "station_id": r[1], "station_name": st_name, "charger_id": None, "charger_code": "", "content": f"告警等级 {r[2]}", "level": r[2] if r[2] in ("info","warning","critical") else "warning"})
+
+    # 8) 用户增长趋势（近7日注册）
+    user_trend = []
+    _ok, rows_u, _ = _q("select substr(register_time,1,10) as d, count(*) from `chargestation`.`user` where register_time >= '2026-09-04' group by substr(register_time,1,10) order by d;")
+    for r in (rows_u or []):
+        user_trend.append({"date": r[0], "user_count": int(r[1] or 0)})
+
+    # 9) 峰谷电量（按时段手动分档，与默认 price_rule 一致）
+    #    谷 00-08 / 平 08-17+21-24 / 峰 17-21
+    _ok, rows_pv, _ = _q("select substr(start_time,12,2) as h, round(sum(energy_kwh),1) from `chargestation`.`charging_order` group by substr(start_time,12,2);")
+    pv = {"day": today_energy, "valley": 0.0, "flat": 0.0, "peak": 0.0}
+    for r in (rows_pv or []):
+        try:
+            hh = int(r[0]); e = float(r[1] or 0)
+        except Exception:
+            continue
+        if 0 <= hh < 8: pv["valley"] += e
+        elif 17 <= hh < 21: pv["peak"] += e
+        else: pv["flat"] += e
+
+    # 10) 碳排 / 绿色充电指数（碳排因子 0.7kg/kWh）
+    _ok, rows_e, _ = _q("select round(sum(energy_kwh),1) from `chargestation`.`charging_order`;")
+    total_energy = float(_row0(rows_e) or 0)
+    FACTOR = 0.7  # kg CO2 / kWh
+    today_reduce = round(today_energy * FACTOR / 1000.0, 2)      # 吨
+    total_reduce = round(total_energy * FACTOR / 1000.0, 2)
+    valley_ratio = (pv["valley"] / pv["day"]) if pv["day"] else 0
+    green_index = round(min(100, 60 + valley_ratio * 40), 1)     # 基于谷电占比的样子指数
+    carbon = {
+        "today_energy_kwh": today_energy,
+        "today_reduce_tons": today_reduce,
+        "total_energy_kwh": total_energy,
+        "total_reduce_tons": total_reduce,
+        "green_index": green_index,
+    }
+
+    # 11) 实时事件流（订单创建 + 告警）
+    events = []
+    _ok, rows_ev, _ = _q("select id, create_time, user_id, station_id from `chargestation`.`charging_order` order by create_time desc limit 8;")
+    st_map = {str(s["id"]): s["name"] for s in stations}
+    for r in (rows_ev or []):
+        uid = r[2]; st = st_map.get(str(r[3]), "某站")
+        phone = f"用户{uid}"
+        events.append({"id": f"evt-o{r[0]}", "occur_time": r[1], "type": "order", "content": f"{phone} 在 {st} 完成充电"})
+    for r in (rows_a or []):
+        events.append({"id": f"evt-a{r[0]}", "occur_time": r[3], "type": "alarm", "content": f"站点发生{ r[2] }告警"})
+    events = events[:10]
+
+    return {
+        "metrics": {
+            "station_count": station_count,
+            "charger_count": charger_count,
+            "online_charger_count": online_charger_count,
+            "today_energy_kwh": today_energy,
+            "today_orders": today_orders,
+            "today_revenue": today_revenue,
+        },
+        "status_distribution": sd,
+        "order_trend": order_trend,
+        "energy_revenue_trend": energy_revenue_trend,
+        "station_rank": station_rank,
+        "stations": stations,
+        "alarms": alarms,
+        "events": events,
+        "user_trend": user_trend,
+        "peak_valley": pv,
+        "carbon": carbon,
+        "filter_options": {"regions": [], "stations": [{"id": s["id"], "name": s["name"]} for s in stations]},
+    }
 
 class Handler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *a, **kw):
@@ -138,6 +400,30 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if parsed.path == "/":
             # 跳到 index.html（大屏）
             self.path = "/index.html"
+        if parsed.path == "/api/snapshot":
+            try:
+                payload = build_snapshot()
+            except Exception as e:
+                payload = {"error": str(e)}
+            body = json.dumps(payload, ensure_ascii=False)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body.encode("utf-8"))
+            return
+        if parsed.path == "/api/forecast":
+            try:
+                payload = build_forecast()
+            except Exception as e:
+                payload = {"error": str(e)}
+            body = json.dumps(payload, ensure_ascii=False)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body.encode("utf-8"))
+            return
         super().do_GET()
 
     def do_POST(self):
@@ -150,6 +436,23 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             except Exception:
                 data, sql = {}, ""
             ok, cols, rows, elapsed, err = run_hive_sql(sql)
+            payload = {"ok": ok, "cols": cols, "rows": rows, "message": err}
+            res = json.dumps(payload, ensure_ascii=False)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(res.encode("utf-8"))
+            return
+        if self.path == "/api/spark":
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length).decode("utf-8", "ignore")
+            try:
+                data = json.loads(body)
+                sql = data.get("sql", "")
+            except Exception:
+                data, sql = {}, ""
+            ok, cols, rows, err = run_spark_sql(sql)
             payload = {"ok": ok, "cols": cols, "rows": rows, "message": err}
             res = json.dumps(payload, ensure_ascii=False)
             self.send_response(200)

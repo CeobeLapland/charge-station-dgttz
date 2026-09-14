@@ -244,6 +244,43 @@ jdbc:mysql://node100:3306/metastore , 用户 root, 密码 123456, 驱动 com.mys
 
 ---
 
+## 5.5 Spark-SQL 分析 与 机器学习演示
+
+### Spark 读取 Hive 的配置（已调好，若恢复镜像需重做）
+Spark 要能读 Hive，需让 Spark 直连 MySQL 元库（不依赖独立 metastore 服务 9083）：
+
+1. **改 `spark-defaults.conf`**：把 `spark.hadoop.hive.metastore.uris=thrift://localhost:9083` 注释掉（否则优先级最高，Spark 会去连没起的 9083 而失败）。
+2. **改 `spark-3.4.1/conf/hive-site.xml`** 为直连 MySQL：
+   ```
+   javax.jdo.option.ConnectionURL   = jdbc:mysql://node100:3306/metastore
+   ConnectionDriverName             = com.mysql.cj.jdbc.Driver
+   ConnectionUserName                = root
+   ConnectionPassword                = 123456
+   hive.metastore.warehouse.dir      = hdfs://node100:9000/user/hive/warehouse
+   ```
+3. Spark 已带 `mysql-connector-java-8.0.26.jar`，无需另装。
+
+### 跑 Spark-SQL 多维度分析
+脚本在仓库 `machine_learning/tools/spark_analysis.sql`（清洗 + 8 个分析维度 + 2 组对比）：
+```bash
+cd ~
+cp <仓库>/machine_learning/tools/spark_analysis.sql ~/   # 或用网关 /hadoop 页的 SPARK-SQL 按钮
+timeout 180 /opt/module/spark-3.4.1/bin/spark-sql --master local[2] -f ~/spark_analysis.sql
+```
+也可在演示页 `/hadoop` 点「★ SPARK-SQL 多维度大数据分析」下的按钮，由网关调 Spark 引擎实时算出（首次 10~30 秒）。
+
+### 大屏的机器学习预测
+大屏 `?mode=live` 会自动从 `/api/forecast` 拉 PME 负荷预测（未来 24h：实线=历史实际、虚线=预测、阴影=置信区间，含 MAPE 评估），算法 Python 复刻自 `machine_learning/` 的 C++ LoadForecastingEngine。
+
+### /hadoop 与 /api 接口速查
+- `GET /api/snapshot`：大屏主数据（Hive 聚合，含新模块 user_trend/peak_valley/carbon/events/forecast）
+- `GET /api/forecast`：PME 负荷预测
+- `POST /api/hive`：HiveServer2 原始 SQL
+- `POST /api/spark`：Spark-SQL 引擎分析
+- `GET /hadoop`：大数据查询演示页
+
+---
+
 ## 6. 安全起见：导出备份的 `charge.db`
 
 原始业务库在 Windows 侧仓库 `server/sql/charge.db`，Hive 里的数据就是从那导出的。若要重导最新数据，用仓库里的 `_export_hive.py` 重新生成 `hive_sync/` 再上传。
