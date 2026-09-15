@@ -13,6 +13,7 @@
 import sys
 import json
 import os
+import threading
 import http.server
 import subprocess
 import urllib.parse
@@ -107,6 +108,160 @@ def run_spark_sql(sql, timeout=180):
             rows = [r.split("\t") for r in clean[1:] if r.strip()]
     return True, cols, rows, ""
 
+# ================= 开发者模式（/admin）辅助 =================
+# 说明：所有管理员操作都走 beeline（HiveServer2），不做 SQL 注入面——
+#       表名一律用 show tables 白名单，值一律转义单引号。
+
+def _beeline_lines(sql, timeout=240):
+    """执行一句 Hive SQL，返回过滤噪声后的原始行列表（用于 /admin 自己解析）"""
+    if not os.path.exists(BEELINE):
+        return []
+    cmd = [BEELINE, "-u", HS2_URI, "-n", HS2_USER, "--silent=true", "--outputformat=tsv2", "-e", sql]
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except Exception:
+        return []
+    out = []
+    for l in (p.stdout or "").splitlines():
+        s = l.strip()
+        if not s:
+            continue
+        if s == "OK" or s.startswith("Time taken") or s.startswith("WARN") \
+           or s.startswith("SLF4J") or s.startswith("log4j") or s.startswith("Setting default") \
+           or "To adjust logging level" in s or s.startswith("Beeline version"):
+            continue
+        out.append(l.rstrip("\n"))
+    return out
+
+_ADMIN_TABLES = {"ts": 0.0, "names": []}
+
+def _read_dash_cache():
+    """读大屏预聚合缓存（dash_cache.json），读不到返回 {}"""
+    try:
+        p = os.path.join(SCREEN_DIR, "dash_cache.json")
+        if os.path.exists(p):
+            with open(p, encoding="utf-8") as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+def admin_table_names(force=False):
+    """列出 chargestation 库下的业务表名（排除 _ 开头临时表），300s 缓存"""
+    now = _time.time()
+    if not force and _ADMIN_TABLES["names"] and now - _ADMIN_TABLES["ts"] < 300:
+        return list(_ADMIN_TABLES["names"])
+    names = []
+    for l in _beeline_lines("show tables in chargestation;"):
+        parts = l.split("\t")
+        name = (parts[0] or "").strip()
+        if name and name != "tab_name" and not name.startswith("_"):
+            names.append(name)
+    names.sort()
+    _ADMIN_TABLES.update(ts=now, names=names)
+    return names
+
+def admin_table_cols(table):
+    """返回表的列名列表（DESCRIBE）"""
+    cols = []
+    for l in _beeline_lines("describe chargestation.%s;" % table, timeout=120):
+        parts = l.split("\t")
+        name = (parts[0] or "").strip()
+        if not name or name == "col_name" or name.startswith("#"):
+            continue
+        if len(parts) < 2 or not (parts[1] or "").strip():
+            continue
+        cols.append(name)
+    return cols
+
+_ADMIN_COUNTS = {"ts": 0.0, "counts": {}}
+
+def admin_row_counts(tables):
+    """多表行数。三级加速：
+    1) dash_cache.json 的 table_counts（dash_engine 单 Spark 会话算好，秒回）
+    2) spark-sql 单会话批量算（起一次 JVM，约 30~60s），内存缓存 10 分钟
+    3) beeline 兜底（30 个 MR 串行，很慢，仅保证可用）
+    """
+    if not tables:
+        return {}
+    # 1) 预聚合缓存
+    ce = _read_dash_cache()
+    if ce.get("table_counts"):
+        m = {}
+        for r in ce["table_counts"]:
+            try:
+                m[str(r[0])] = int(r[1])
+            except Exception:
+                continue
+        if m:
+            return {t: m.get(t) for t in tables}
+    # 2) spark 单会话批量 + 内存缓存
+    now = _time.time()
+    if _ADMIN_COUNTS["counts"] and now - _ADMIN_COUNTS["ts"] < 600:
+        return {t: _ADMIN_COUNTS["counts"].get(t) for t in tables}
+    sql = ";".join("select '%s' as t, count(*) as c from chargestation.%s" % (t, t) for t in tables)
+    ok, _, rows, err = run_spark_sql(sql)
+    out = {}
+    if ok:
+        for r in (rows or []):
+            if len(r) >= 2:
+                t, c = r[0].strip(), r[1].strip()
+                if t in tables and c.isdigit():
+                    out[t] = int(c)
+        if out:
+            _ADMIN_COUNTS.update(ts=now, counts=out)
+            return out
+    # 3) beeline 兜底
+    sql = ";".join("select '%s' as t, count(*) as c from chargestation.%s" % (t, t) for t in tables)
+    out = {}
+    for l in _beeline_lines(sql, timeout=300):
+        parts = l.split("\t")
+        if len(parts) >= 2:
+            t, c = parts[0].strip(), parts[1].strip()
+            if t in tables and c.isdigit():
+                out[t] = int(c)
+    return out
+
+def _esc_sql(v):
+    """SQL 字符串字面量转义（单引号翻倍）"""
+    return str(v).replace("'", "''")
+
+def _parse_multipart(body, boundary):
+    """解析 multipart/form-data 原始字节 -> (fields: dict, files: dict[filename->(name, bytes]))"""
+    fields, files = {}, {}
+    sep = ("--" + boundary).encode("utf-8")
+    for part in body.split(sep):
+        part = part.strip(b"\r\n")
+        if not part or part == b"--":
+            continue
+        head, _, content = part.partition(b"\r\n\r\n")
+        head_text = head.decode("utf-8", "ignore")
+        name = filename = None
+        for line in head_text.split("\r\n"):
+            if line.lower().startswith("content-disposition"):
+                for seg in line.split(";"):
+                    seg = seg.strip()
+                    if seg.startswith('name="'):
+                        name = seg[6:-1]
+                    elif seg.startswith("filename="):
+                        filename = seg[9:].strip().strip('"')
+        if name is None:
+            continue
+        if filename is not None:
+            files[name] = (filename, content)
+        else:
+            fields[name] = content.decode("utf-8", "ignore")
+    return fields, files
+
+def _json_reply(handler, payload):
+    body = json.dumps(payload, ensure_ascii=False)
+    handler.send_response(200)
+    handler.send_header("Content-Type", "application/json; charset=utf-8")
+    handler.send_header("Cache-Control", "no-store")
+    handler.end_headers()
+    handler.wfile.write(body.encode("utf-8"))
+
+
 INDEX_PAGE = """<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Hadoop / Hive 查询演示</title>
 <style>
@@ -123,6 +278,7 @@ button:hover{background:#1e40af}
 a{color:#7dd3fc}
 </style></head><body>
 <h1>Big Data 演示 · Hadoop + Hive 查询网关</h1>
+<div style="margin-bottom:8px;font-size:12px"><a href="/index.html">← 返回大屏</a> ｜ <a href="/admin">开发者模式</a></div>
 <div class="status">HiveServer2: <b>{HS2_URI}</b> ｜ 用户: <b>{HS2_USER}</b></div>
 <h3>常用演示查询（点击即执行，或自行输入 SQL）：</h3>
 <div id="quick">
@@ -283,6 +439,268 @@ def build_forecast():
     fc["model"] = "PME 周期性移动平均外推"
     return fc
 
+def _build_filtered(ce, region, sid, date):
+    """从 dash_cache 的区域/站点预聚合区段组装筛选快照（纯内存，秒回，零 spark）。
+    区域/站点/日期可任意组合；返回结构与全量快照一致。"""
+    st_rows = ce.get("stations") or []
+    st_ch = {}   # station_id -> [count, online]
+    st_od = {}   # station_id -> [orders, energy, revenue]
+    for r in ce.get("station_charger") or []:
+        try:
+            st_ch[str(r[0])] = [int(r[1] or 0), int(r[2] or 0)]
+        except Exception:
+            continue
+    for r in ce.get("station_order") or []:
+        try:
+            st_od[str(r[0])] = [int(r[1] or 0), float(r[2] or 0), float(r[3] or 0)]
+        except Exception:
+            continue
+    # 站点作用域（区域/站点筛选）
+    scope = []
+    for r in st_rows:
+        if region and (r[2] or "") != region:
+            continue
+        if sid and str(r[0]) != str(sid):
+            continue
+        scope.append(r)
+    scope_ids = {str(r[0]) for r in scope}
+    st_map = {str(r[0]): r[1] for r in scope}
+
+    # 1) 指标卡
+    station_count = len(scope)
+    charger_count = sum(st_ch.get(str(r[0]), [0, 0])[0] for r in scope)
+    online_charger_count = sum(st_ch.get(str(r[0]), [0, 0])[1] for r in scope)
+    if date:
+        today_orders = today_energy = today_revenue = 0
+        for r in ce.get("station_trend") or []:
+            if str(r[0]) not in scope_ids:
+                continue
+            if (r[1] or "") != date:
+                continue
+            today_orders += int(r[2] or 0)
+            today_energy += float(r[3] or 0)
+            today_revenue += float(r[4] or 0)
+        today_energy = round(today_energy, 1)
+        today_revenue = round(today_revenue, 2)
+    else:
+        today_orders = sum(st_od.get(str(r[0]), [0, 0, 0])[0] for r in scope)
+        today_energy = round(sum(st_od.get(str(r[0]), [0, 0, 0])[1] for r in scope), 1)
+        today_revenue = round(sum(st_od.get(str(r[0]), [0, 0, 0])[2] for r in scope), 2)
+
+    # 2) 设备状态分布
+    sd = {"idle": 0, "charging": 0, "offline": 0, "fault": 0}
+    for r in ce.get("station_status") or []:
+        if str(r[0]) not in scope_ids:
+            continue
+        s, n = (r[1] or "").strip(), int(r[2] or 0)
+        if s == "idle": sd["idle"] += n
+        elif s == "offline": sd["offline"] += n
+        elif s == "fault": sd["fault"] += n
+        else: sd["charging"] += n
+
+    # 3) 趋势（scope 内按日期聚合；选了日期则只显示该日期）
+    trend_map = {}
+    for r in ce.get("station_trend") or []:
+        if str(r[0]) not in scope_ids:
+            continue
+        d = r[1] or ""
+        if not d:
+            continue
+        if date and d != date:
+            continue
+        t = trend_map.setdefault(d, [0, 0.0, 0.0])
+        t[0] += int(r[2] or 0); t[1] += float(r[3] or 0); t[2] += float(r[4] or 0)
+    order_trend, energy_revenue_trend = [], []
+    for d in sorted(trend_map):
+        t = trend_map[d]
+        order_trend.append({"date": d, "order_count": t[0]})
+        energy_revenue_trend.append({"date": d, "energy_kwh": round(t[1], 1), "revenue": round(t[2], 2)})
+    order_trend = order_trend[-7:]
+    energy_revenue_trend = energy_revenue_trend[-7:]
+
+    # 4) 站点排行（scope 内按订单数 TOP5）
+    rank_items = []
+    for r in scope:
+        o = st_od.get(str(r[0]), [0, 0, 0])
+        rank_items.append({"station_id": r[0], "station_name": r[1], "today_orders": o[0], "today_energy_kwh": o[1]})
+    rank_items.sort(key=lambda x: x["today_orders"], reverse=True)
+    station_rank = rank_items[:5]
+
+    # 5) 地图站点
+    stations = []
+    for r in scope:
+        try:
+            lon, lat = float(r[3] or 0), float(r[4] or 0)
+        except Exception:
+            lon = lat = 0
+        stations.append({"id": r[0], "name": r[1], "region": r[2] or "", "longitude": lon, "latitude": lat, "status": "normal", "status_text": "正常运行"})
+
+    # 6) 告警 / 事件（按 scope 站点过滤，日期可选）
+    alarms = []
+    for r in ce.get("alarms") or []:
+        if str(r[1]) not in scope_ids:
+            continue
+        if date and not (r[3] or "").startswith(date):
+            continue
+        alarms.append({"id": r[0], "occur_time": r[3], "station_id": r[1], "station_name": "", "charger_id": None, "charger_code": "", "content": f"告警等级 {r[2]}", "level": r[2] if r[2] in ("info", "warning", "critical") else "warning"})
+    events = []
+    for r in ce.get("events") or []:
+        if str(r[3]) not in scope_ids:
+            continue
+        if date and not (r[1] or "").startswith(date):
+            continue
+        uid = r[2]
+        st = st_map.get(str(r[3]), "某站")
+        events.append({"id": f"evt-o{r[0]}", "occur_time": r[1], "type": "order", "content": f"用户{uid} 在 {st} 完成充电"})
+    for r in alarms:
+        events.append({"id": f"evt-a{r['id']}", "occur_time": r["occur_time"], "type": "alarm", "content": f"站点发生{r['content']}告警"})
+    events = events[:10]
+
+    # 7) 峰谷电量
+    pv = {"day": today_energy, "valley": 0.0, "flat": 0.0, "peak": 0.0}
+    for r in ce.get("station_peakvalley") or []:
+        if str(r[0]) not in scope_ids:
+            continue
+        try:
+            hh, e = int(r[1]), float(r[2] or 0)
+        except Exception:
+            continue
+        if 0 <= hh < 8: pv["valley"] += e
+        elif 17 <= hh < 21: pv["peak"] += e
+        else: pv["flat"] += e
+
+    # 8) 碳排（沿用全局公式）
+    FACTOR = 0.7
+    today_reduce = round(today_energy * FACTOR / 1000.0, 2)
+    total_reduce = round(today_energy * FACTOR / 1000.0, 2)
+    valley_ratio = (pv["valley"] / pv["day"]) if pv["day"] else 0
+    green_index = round(min(100, 60 + valley_ratio * 40), 1)
+    carbon = {"today_energy_kwh": today_energy, "today_reduce_tons": today_reduce, "total_energy_kwh": today_energy, "total_reduce_tons": total_reduce, "green_index": green_index}
+
+    # 9) 用户增长（平台级，保持全局）
+    user_trend = [{"date": r[0], "user_count": int(r[1] or 0)} for r in (ce.get("user_trend") or [])]
+
+    # 10) 筛选项（全局候选，便于切换）
+    regions, st_opt = [], []
+    reg_set = set()
+    for r in ce.get("stations") or []:
+        st_opt.append({"id": r[0], "name": r[1]})
+        if len(r) > 2 and r[2]:
+            reg_set.add(r[2])
+    filter_options = {"regions": sorted(reg_set), "stations": st_opt}
+
+    return {
+        "metrics": {
+            "station_count": station_count,
+            "charger_count": charger_count,
+            "online_charger_count": online_charger_count,
+            "today_energy_kwh": today_energy,
+            "today_orders": today_orders,
+            "today_revenue": today_revenue,
+        },
+        "status_distribution": sd,
+        "order_trend": order_trend,
+        "energy_revenue_trend": energy_revenue_trend,
+        "station_rank": station_rank,
+        "stations": stations,
+        "alarms": alarms,
+        "events": events,
+        "user_trend": user_trend,
+        "peak_valley": pv,
+        "carbon": carbon,
+        "filter_options": filter_options,
+    }
+
+def build_ml():
+    """从 dash_cache 组装机器学习面板数据（需求热力/健康度/WhatIf 基线），纯内存秒回。"""
+    ce = _read_dash_cache()
+    # ---- 需求热力：星期×小时×区域 需求 + 激增检测 ----
+    heat, agg = [], {}
+    for r in ce.get("demand_heat") or []:
+        try:
+            dow, hour, c = int(r[0]), int(r[1]), int(r[3] or 0)
+        except Exception:
+            continue
+        area = r[2] or ""
+        if dow < 1 or dow > 7 or hour < 0 or hour > 23:
+            continue
+        heat.append({"dow": dow, "hour": hour, "area": area, "demand": c})
+        a = agg.setdefault((hour, area), [0, 0])
+        a[0] += c; a[1] += 1
+    mean = {k: v[0] / max(v[1], 1) for k, v in agg.items()}
+    for item in heat:
+        m = mean.get((item["hour"], item["area"]), 0)
+        delta = (item["demand"] - m) / m if m else 0
+        item["delta"] = round(delta, 2)
+        item["surge"] = delta > 0.5
+    surge = sorted([x for x in heat if x["surge"]], key=lambda x: x["delta"], reverse=True)[:5]
+
+    # ---- 设备健康度：扣分制评分 + 风险等级 + 分布 + 高风险 TOP ----
+    health = {"dist": [0, 0, 0, 0, 0], "risk": []}   # 分布桶:<60,60-70,70-80,80-90,90-100
+    for r in ce.get("health_charger") or []:
+        try:
+            sname, code = r[0] or "", r[1] or ""
+            h = int(r[2] if r[2] not in (None, "") else 100)
+            t = float(r[3] or 0)
+        except Exception:
+            continue
+        cm = (r[4] or "").strip()
+        score = h
+        if t > 50: score -= int(min(2 * (t - 50), 60))
+        if cm == "abnormal": score -= 15
+        score = max(0, min(100, score))
+        risk = (100 - score) / 100.0 * 0.8
+        level = "high" if risk >= 0.6 else ("medium" if risk >= 0.3 else "low")
+        if score < 60: health["dist"][0] += 1
+        elif score < 70: health["dist"][1] += 1
+        elif score < 80: health["dist"][2] += 1
+        elif score < 90: health["dist"][3] += 1
+        else: health["dist"][4] += 1
+        health["risk"].append({"station": sname, "code": code, "health": score, "level": level, "risk": round(risk, 2)})
+    health["risk"].sort(key=lambda x: x["risk"], reverse=True)
+    health["risk"] = health["risk"][:8]
+
+    # ---- WhatIf 基线（前端滑条推演用）----
+    base = {"avg_revenue_per_order": 0.0, "avg_energy_per_order": 0.0, "total_orders": 0,
+            "peak_hour": 0, "peak_demand": 0, "queue": 0, "charger_count": 0,
+            "daily_orders": 0, "daily_revenue": 0.0}
+    m = ce.get("ml_agg")
+    if m and m[0]:
+        try:
+            base["avg_revenue_per_order"] = float(m[0][0] or 0)
+            base["avg_energy_per_order"] = float(m[0][1] or 0)
+            base["total_orders"] = int(m[0][2] or 0)
+        except Exception:
+            pass
+    pk = ce.get("ml_peak")
+    if pk and pk[0]:
+        try:
+            base["peak_hour"] = int(pk[0][0] or 0)
+            base["peak_demand"] = int(pk[0][1] or 0)
+        except Exception:
+            pass
+    q = ce.get("ml_queue")
+    if q and q[0]:
+        try:
+            base["queue"] = int(q[0][0] or 0)
+        except Exception:
+            pass
+    ct = ce.get("charger_total")
+    if ct and ct[0]:
+        try:
+            base["charger_count"] = int(ct[0][0] or 0)
+        except Exception:
+            pass
+    trend = ce.get("trend") or []
+    if trend:
+        days = len(trend)
+        try:
+            base["daily_orders"] = int(round(sum(int(r[1] or 0) for r in trend) / max(days, 1)))
+            base["daily_revenue"] = round(sum(float(r[3] or 0) for r in trend) / max(days, 1), 2)
+        except Exception:
+            pass
+    return {"ok": True, "demand_heat": heat, "top_surge": surge, "health": health, "whatif": base}
+
 def build_snapshot(region="", station_id="", date=""):
     """从 Hive 聚合出大屏需要的完整快照（与 screen.snapshot_resp.payload 同构）。
     优先读取 dash_engine.py 预生成的 dash_cache.json（单次spark会话产物），秒回；缺失再逐条查。
@@ -316,6 +734,9 @@ def build_snapshot(region="", station_id="", date=""):
         _CE = {}
     import sys as _sys
     _sys.stderr.write(f"[dash] cache_keys={list(_CE.keys())[:6]} use_filter={bool(region or station_id or date)}\n")
+    # 筛选：若缓存含站点维度预聚合区段（dash_engine 新版产物），走内存组装，秒回
+    if use_filter and _CE.get("station_order"):
+        return _build_filtered(_CE, region, station_id, date)
     def _rc(key, i, default=""):
         """从缓存取第i行第0~col列"""
         try:
@@ -535,6 +956,47 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
+        if parsed.path == "/admin":
+            # 开发者模式页（screen/admin.html）
+            p = os.path.join(SCREEN_DIR, "admin.html")
+            if os.path.exists(p):
+                with open(p, encoding="utf-8") as f:
+                    html = f.read()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(html.encode("utf-8"))
+                return
+            self.send_response(404); self.end_headers(); self.wfile.write(b"admin.html not found")
+            return
+        if parsed.path == "/api/admin/tables":
+            try:
+                tables = admin_table_names()
+                counts = admin_row_counts(tables)
+                _json_reply(self, {"ok": True, "tables": [{"name": t, "count": counts.get(t)} for t in tables],
+                                   "updated": _time.strftime("%H:%M:%S")})
+            except Exception as e:
+                _json_reply(self, {"ok": False, "message": str(e)})
+            return
+        if parsed.path == "/api/admin/describe":
+            q = urllib.parse.parse_qs(parsed.query)
+            table = (q.get("table") or [""])[0].strip()
+            if table not in admin_table_names():
+                _json_reply(self, {"ok": False, "message": "表不存在或不在允许列表：" + table})
+                return
+            try:
+                cols = admin_table_cols(table)
+                _json_reply(self, {"ok": True, "table": table, "cols": cols})
+            except Exception as e:
+                _json_reply(self, {"ok": False, "message": str(e)})
+            return
+        if parsed.path == "/api/ml":
+            try:
+                payload = build_ml()
+            except Exception as e:
+                payload = {"ok": False, "message": str(e)}
+            _json_reply(self, payload)
+            return
         if parsed.path == "/hadoop":
             # 用 replace 而非 format，避免 CSS 大括号被误当占位符
             html = INDEX_PAGE.replace("{HS2_URI}", HS2_URI).replace("{HS2_USER}", HS2_USER)
@@ -584,6 +1046,130 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         super().do_GET()
 
     def do_POST(self):
+        if self.path == "/api/admin/insert":
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length).decode("utf-8", "ignore")
+            try:
+                data = json.loads(body)
+            except Exception:
+                data = {}
+            table = (data.get("table") or "").strip()
+            values = data.get("values") or {}
+            if table not in admin_table_names():
+                _json_reply(self, {"ok": False, "message": "表不存在或不在允许列表：" + table}); return
+            try:
+                cols = admin_table_cols(table)
+                if not cols:
+                    _json_reply(self, {"ok": False, "message": "无法读取表结构"}); return
+                vals = ["'" + _esc_sql(values.get(c, "")) + "'" for c in cols]
+                sql = "insert into table chargestation.%s (%s) values (%s);" % (table, ", ".join(cols), ", ".join(vals))
+                ok, _, _, _, err = run_hive_sql(sql)
+                if not ok:
+                    # 兼容不支持列名 VALUES 的老版本 Hive：不带列名全列插入
+                    ok2, _, _, _, err2 = run_hive_sql("insert into table chargestation.%s values (%s);" % (table, ", ".join(vals)))
+                    if not ok2:
+                        _json_reply(self, {"ok": False, "message": "插入失败：" + (err2 or err)}); return
+                _json_reply(self, {"ok": True, "message": "已向 %s 插入 1 条（重建大屏缓存后生效）" % table})
+            except Exception as e:
+                _json_reply(self, {"ok": False, "message": str(e)})
+            return
+        if self.path == "/api/admin/import":
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length)
+            ct = self.headers.get("Content-Type", "")
+            boundary = ""
+            for seg in ct.split(";"):
+                seg = seg.strip()
+                if seg.startswith("boundary="):
+                    boundary = seg[9:].strip().strip('"')
+            if not boundary:
+                _json_reply(self, {"ok": False, "message": "缺少 multipart boundary"}); return
+            try:
+                fields, files = _parse_multipart(body, boundary)
+            except Exception as e:
+                _json_reply(self, {"ok": False, "message": "解析上传失败：" + str(e)}); return
+            table = (fields.get("table") or "").strip()
+            fmt = (fields.get("format") or "tsv").strip().lower()
+            mode = (fields.get("mode") or "append").strip().lower()
+            if table not in admin_table_names():
+                _json_reply(self, {"ok": False, "message": "表不存在或不在允许列表：" + table}); return
+            if not files:
+                _json_reply(self, {"ok": False, "message": "未收到文件"}); return
+            fname, content = next(iter(files.values()))
+            if not content:
+                _json_reply(self, {"ok": False, "message": "文件为空"}); return
+            try:
+                cols = admin_table_cols(table)
+                if not cols:
+                    _json_reply(self, {"ok": False, "message": "无法读取表结构"}); return
+                delim = "\t" if fmt == "tsv" else ","
+                text = content.decode("utf-8", "ignore")
+                first = next((l for l in text.splitlines() if l.strip()), "")
+                n = len(first.split(delim))
+                if n != len(cols):
+                    _json_reply(self, {"ok": False, "message": "列数不匹配：文件首行 %d 列，表 %s 共 %d 列（%s），请按表列顺序准备文件" % (n, table, len(cols), ",".join(cols[:6]) + ("…" if len(cols) > 6 else ""))}); return
+                path = "/tmp/admin_import_%d.%s" % (int(_time.time() * 1000), "tsv" if fmt == "tsv" else "csv")
+                with open(path, "wb") as f:
+                    f.write(content)
+                try:
+                    if fmt == "tsv":
+                        sql = "load data local inpath '%s' into%s table chargestation.%s;" % (path, " overwrite" if mode == "replace" else "", table)
+                        ok, _, _, _, err = run_hive_sql(sql)
+                        if not ok:
+                            _json_reply(self, {"ok": False, "message": "导入失败：" + err}); return
+                        nrows = len([l for l in text.splitlines() if l.strip()])
+                        _json_reply(self, {"ok": True, "message": "已导入 %d 行到 %s（请重建大屏缓存）" % (nrows, table)})
+                    else:
+                        tmp = "_admin_tmp_%d" % int(_time.time())
+                        run_hive_sql("drop table if exists chargestation.%s;" % tmp)
+                        cols_ddl = ", ".join("%s string" % c for c in cols)
+                        ok, _, _, _, err = run_hive_sql("create table chargestation.%s (%s) row format delimited fields terminated by ',';" % (tmp, cols_ddl))
+                        if not ok:
+                            _json_reply(self, {"ok": False, "message": "建临时表失败：" + err}); return
+                        ok, _, _, _, err = run_hive_sql("load data local inpath '%s' into table chargestation.%s;" % (path, tmp))
+                        if not ok:
+                            _json_reply(self, {"ok": False, "message": "装载临时表失败：" + err}); return
+                        ok, _, _, _, err = run_hive_sql("insert %s table chargestation.%s select * from chargestation.%s;" % ("overwrite" if mode == "replace" else "into", table, tmp))
+                        run_hive_sql("drop table if exists chargestation.%s;" % tmp)
+                        if not ok:
+                            _json_reply(self, {"ok": False, "message": "写入目标表失败：" + err}); return
+                        nrows = len([l for l in text.splitlines() if l.strip()])
+                        _json_reply(self, {"ok": True, "message": "已导入 %d 行到 %s（请重建大屏缓存）" % (nrows, table)})
+                finally:
+                    try:
+                        os.remove(path)
+                    except Exception:
+                        pass
+            except Exception as e:
+                _json_reply(self, {"ok": False, "message": str(e)})
+            return
+        if self.path == "/api/admin/clear":
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length).decode("utf-8", "ignore")
+            try:
+                data = json.loads(body)
+            except Exception:
+                data = {}
+            table = (data.get("table") or "").strip()
+            if table not in admin_table_names():
+                _json_reply(self, {"ok": False, "message": "表不存在或不在允许列表：" + table}); return
+            ok, _, _, _, err = run_hive_sql("truncate table chargestation.%s;" % table)
+            _json_reply(self, {"ok": ok, "message": ("已清空 %s（请重建大屏缓存）" % table) if ok else ("清空失败：" + err)})
+            return
+        if self.path == "/api/admin/rebuild":
+            out = os.path.join(SCREEN_DIR, "dash_cache.json")
+            eng = os.path.join(SCREEN_DIR, "dash_engine.py")
+            if not os.path.exists(eng):
+                _json_reply(self, {"ok": False, "message": "找不到 dash_engine.py"}); return
+            try:
+                def _run():
+                    subprocess.Popen([sys.executable, eng, out],
+                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                threading.Thread(target=_run, daemon=True).start()
+                _json_reply(self, {"ok": True, "message": "已触发大屏缓存重建（dash_engine.py），约 30~60 秒后大屏自动生效"})
+            except Exception as e:
+                _json_reply(self, {"ok": False, "message": str(e)})
+            return
         if self.path == "/api/hive":
             length = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(length).decode("utf-8", "ignore")
