@@ -5,6 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <title>充电运营数据大屏</title>
+    <link rel="icon" href="data:,">
     <link rel="stylesheet" href="css/dashboard.css">
 </head>
 
@@ -59,9 +60,11 @@
                             <div id="energy-revenue-chart" class="chart"></div>
                         </article>
                     </div>
-                    <article class="panel">
-                        <h2>充电站地图</h2>
-                        <div id="station-map" class="chart"></div>
+                    <article class="panel map-panel">
+                        <h2><span>充电站地图</span><span class="map-modes"><button type="button" id="map-mode-map"
+                                    class="on">地图</button><button type="button" id="map-mode-dot">点阵</button></span></h2>
+                        <canvas id="station-map-canvas" class="map-canvas"></canvas>
+                        <div id="station-map" class="chart" hidden></div>
                     </article>
                     <article class="panel">
                         <h2>未来 24 小时充电负荷预测 <span style="color:#557da4;font-size:10px">(PME 机器学习模型)</span></h2>
@@ -159,6 +162,7 @@
     <script src="js/app.js"></script>
     <script src="js/analysis.js"></script>
     <script src="js/ml.js"></script>
+    <script src="js/sitemap.js"></script>
 </body>
 
 </html>

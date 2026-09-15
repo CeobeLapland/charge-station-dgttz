@@ -175,8 +175,9 @@
             items = items || [];
             get("eff-chart")?.setOption({
                 ...base,
-                xAxis: { ...base.xAxis, type: "category", data: items.map(x => x.name), axisLabel: { color: label, fontSize: 11 } },
-                yAxis: { ...base.yAxis, type: "value", name: "平均时长(分)", nameTextStyle: { color: label } },
+                grid: { left: 42, right: 10, top: 26, bottom: 26 },
+                xAxis: { ...base.xAxis, type: "category", data: items.map(x => x.name), axisLabel: { color: label, fontSize: 10 } },
+                yAxis: { ...base.yAxis, type: "value", name: "平均时长(分)", nameTextStyle: { color: label, fontSize: 9 }, nameLocation: "middle", nameGap: 26 },
                 tooltip: {
                     trigger: "axis", backgroundColor: "#fff", borderColor: "#ddd", textStyle: { color: "#333" },
                     formatter: p => {
@@ -187,7 +188,7 @@
                 series: [{
                     type: "bar", data: items.map(x => x.avg_duration), barWidth: 26,
                     itemStyle: { color: "#8ca5bb", borderRadius: [4, 4, 0, 0] },
-                    label: { show: true, position: "top", formatter: p => (p.value ?? 0) + " 分", fontSize: 11, color: label }
+                    label: { show: true, position: "top", formatter: p => (p.value ?? 0) + " 分", fontSize: 10, color: label }
                 }]
             }, true)
         }, loadTrend(t) {

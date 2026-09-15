@@ -1091,6 +1091,102 @@ select {
     font-size: 15px
 }
 
+/* ===== 左栏窄列适配（告警/事件行两列紧凑布局，防文字错乱）===== */
+.live-rail .alarm-head,
+.live-rail .alarm-row {
+    grid-template-columns: 56px minmax(0, 1fr)
+}
+
+.live-rail .alarm-head span:nth-child(3) {
+    display: none
+}
+
+.live-rail .alarm-row {
+    grid-template-rows: auto auto;
+    row-gap: 2px
+}
+
+.live-rail .alarm-panel .alarm-row time {
+    grid-row: 1;
+    grid-column: 1;
+    white-space: nowrap
+}
+
+.live-rail .alarm-panel .alarm-row .alarm-target {
+    grid-row: 1;
+    grid-column: 2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis
+}
+
+.live-rail .alarm-panel .alarm-row .alarm-text {
+    grid-row: 2;
+    grid-column: 2
+}
+
+.live-rail .event-panel .alarm-row time {
+    white-space: nowrap
+}
+
+.live-rail .alarm-list {
+    height: 300px
+}
+
+/* ===== 充电站地图（点阵/地图双模式）===== */
+.live-center .panel.map-panel {
+    height: 480px
+}
+
+.map-panel h2 {
+    justify-content: space-between
+}
+
+.map-modes {
+    display: flex;
+    gap: 6px;
+    margin-left: auto
+}
+
+.map-modes button {
+    padding: 2px 10px;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: #fff;
+    color: #495366;
+    font-size: 10px;
+    cursor: pointer
+}
+
+.map-modes button.on {
+    border-color: var(--blue);
+    background: var(--blue);
+    color: #fff
+}
+
+.map-panel #station-map,
+.map-panel .map-canvas {
+    height: 420px;
+    width: 100%
+}
+
+.map-canvas {
+    border-radius: 8px;
+    overflow: hidden;
+    position: relative;
+    background: #edf2f8;
+    cursor: grab
+}
+
+.map-canvas.dragging {
+    cursor: grabbing
+}
+
+.map-canvas[hidden],
+#station-map[hidden] {
+    display: none !important
+}
+
 @media(max-width:1440px) {
     .live-grid {
         grid-template-columns: minmax(0, 1fr) 300px

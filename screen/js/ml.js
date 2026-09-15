@@ -108,7 +108,7 @@
       info.className = "ml-info";
       info.textContent = r.station + " / " + r.code;
       var h = document.createElement("span");
-      h.className = "ml-health";
+      h.className = "ml-health-num";
       h.textContent = "健康 " + r.health;
       var lv = document.createElement("span");
       lv.className = "ml-level " + r.level;

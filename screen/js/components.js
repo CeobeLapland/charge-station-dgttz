@@ -42,7 +42,12 @@
     }
     class OrderTrendChart {
         render(d) { ScreenCharts.orders(d) }
-    } class EnergyRevenueChart { render(d) { ScreenCharts.energyRevenue(d) } } class StationRankChart { render(d) { ScreenCharts.rank(d) } } class StationMap { render(d) { ScreenCharts.map(d) } }
+    } class EnergyRevenueChart { render(d) { ScreenCharts.energyRevenue(d) } } class StationRankChart { render(d) { ScreenCharts.rank(d) } } class StationMap {
+        render(d) {
+            if (window.ScreenMap) window.ScreenMap.setData(d);
+            else window._pendingMap = d;
+        }
+    }
     class AlarmList {
         render(items) {
             const el = $("alarm-list");
