@@ -5,6 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <title>充电运营数据大屏</title>
+    <link rel="icon" href="data:,">
     <link rel="stylesheet" href="css/dashboard.css">
 </head>
 
@@ -27,72 +28,110 @@
                     </select></label><button id="filter-submit" type="button">查询</button><button id="filter-reset"
                     type="button">重置</button></section>
             <section id="metric-cards" class="metric-grid"></section>
-            <section class="dashboard-grid">
-                <article class="panel">
-                    <h2>设备状态分布</h2>
-                    <div id="status-chart" class="chart"></div>
-                </article>
-                <article class="panel wide">
-                    <h2>近 7 天订单趋势</h2>
-                    <div id="order-trend-chart" class="chart"></div>
-                </article>
-                <article class="panel wide">
-                    <h2>近 7 天充电量与收入</h2>
-                    <div id="energy-revenue-chart" class="chart"></div>
-                </article>
-                <article class="panel">
-                    <h2>TOP5 充电站</h2>
-                    <div id="station-rank-chart" class="chart"></div>
-                </article>
-                <article class="panel wide">
-                    <h2>充电站地图</h2>
-                    <div id="station-map" class="chart"></div>
-                </article>
-                <article class="panel alarm-panel">
-                    <h2>实时告警</h2>
-                    <div class="alarm-head"><span>时间</span><span>站点 / 设备</span><span>告警内容</span></div>
-                    <div id="alarm-list" class="alarm-list"></div>
-                </article>
+            <section class="live-grid">
+                <aside class="live-rail">
+                    <article class="panel alarm-panel">
+                        <h2>实时告警</h2>
+                        <div class="alarm-head"><span>时间</span><span>站点 / 设备</span><span>告警内容</span></div>
+                        <div id="alarm-list" class="alarm-list"></div>
+                    </article>
+                    <article class="panel event-panel">
+                        <h2>实时事件流</h2>
+                        <div id="event-list" class="alarm-list"></div>
+                    </article>
+                    <article class="panel ml-health">
+                        <h2>设备健康度 <span style="color:#557da4;font-size:10px">(HealthAssessment)</span></h2>
+                        <div id="health-chart" class="chart"></div>
+                        <div id="health-risk" class="ml-list"></div>
+                    </article>
+                    <article class="panel ml-eff">
+                        <h2>充电效率分析 <span style="color:#557da4;font-size:10px">(快充 vs 慢充)</span></h2>
+                        <div id="eff-chart" class="chart"></div>
+                    </article>
+                </aside>
+                <div class="live-center">
+                    <div class="center-duo">
+                        <article class="panel">
+                            <h2>近 7 天订单趋势</h2>
+                            <div id="order-trend-chart" class="chart"></div>
+                        </article>
+                        <article class="panel">
+                            <h2>近 7 天充电量与收入</h2>
+                            <div id="energy-revenue-chart" class="chart"></div>
+                        </article>
+                    </div>
+                    <article class="panel map-panel">
+                        <h2><span>充电站地图</span><span class="map-modes"><button type="button" id="map-mode-map"
+                                    class="on">地图</button><button type="button" id="map-mode-dot">点阵</button></span></h2>
+                        <canvas id="station-map-canvas" class="map-canvas"></canvas>
+                        <div id="station-map" class="chart" hidden></div>
+                    </article>
+                    <article class="panel">
+                        <h2>未来 24 小时充电负荷预测 <span style="color:#557da4;font-size:10px">(PME 机器学习模型)</span></h2>
+                        <div id="forecast-chart" class="chart"></div>
+                    </article>
+                    <article class="panel">
+                        <h2>近 7 日负荷走势 <span style="color:#557da4;font-size:10px">(分时叠加 · 多线对比)</span></h2>
+                        <div id="load-trend-chart" class="chart"></div>
+                    </article>
+                    <article class="panel ml-heat">
+                        <h2>需求热力 <span style="color:#557da4;font-size:10px">(DemandForecast · 星期×小时 需求预测)</span></h2>
+                        <div id="demand-heat-chart" class="chart"></div>
+                        <div class="ml-tags" id="demand-surge"></div>
+                    </article>
+                </div>
+                <aside class="live-rail">
+                    <article class="panel">
+                        <h2>设备状态分布</h2>
+                        <div id="status-chart" class="chart"></div>
+                    </article>
+                    <article class="panel">
+                        <h2>TOP5 充电站</h2>
+                        <div id="station-rank-chart" class="chart"></div>
+                    </article>
+                    <article class="panel">
+                        <h2>近 7 天用户增长</h2>
+                        <div id="user-trend-chart" class="chart"></div>
+                    </article>
+                    <article class="panel">
+                        <h2>峰谷电量分布</h2>
+                        <div id="peak-valley-chart" class="chart"></div>
+                    </article>
+                    <article class="panel">
+                        <h2>绿色充电指数</h2>
+                        <div id="carbon-chart" class="chart"></div>
+                    </article>
+                </aside>
             </section>
-            <section class="forecast-grid">
-                <article class="panel wide">
-                    <h2>未来 24 小时充电负荷预测 <span style="color:#557da4;font-size:10px">(PME 机器学习模型)</span></h2>
-                    <div id="forecast-chart" class="chart"></div>
-                </article>
-            </section>
-            <section class="ml-grid">
-                <article class="panel wide ml-heat">
-                    <h2>需求热力 <span style="color:#557da4;font-size:10px">(DemandForecast · 星期×小时 需求预测)</span></h2>
-                    <div id="demand-heat-chart" class="chart"></div>
-                    <div class="ml-tags" id="demand-surge"></div>
-                </article>
-                <article class="panel ml-health">
-                    <h2>设备健康度 <span style="color:#557da4;font-size:10px">(HealthAssessment)</span></h2>
-                    <div id="health-chart" class="chart"></div>
-                    <div id="health-risk" class="ml-list"></div>
-                </article>
-                <article class="panel ml-whatif">
-                    <h2>What-If 决策推演 <span style="color:#557da4;font-size:10px">(增桩/调价/客流)</span></h2>
-                    <div id="whatif-panel" class="whatif"></div>
-                </article>
-            </section>
-            <section class="extra-grid">
-                <article class="panel wide">
-                    <h2>近 7 天用户增长</h2>
-                    <div id="user-trend-chart" class="chart"></div>
-                </article>
-                <article class="panel">
-                    <h2>峰谷电量分布</h2>
-                    <div id="peak-valley-chart" class="chart"></div>
-                </article>
-                <article class="panel">
-                    <h2>绿色充电指数</h2>
-                    <div id="carbon-chart" class="chart"></div>
-                </article>
-                <article class="panel event-panel">
-                    <h2>实时事件流</h2>
-                    <div id="event-list" class="alarm-list"></div>
-                </article>
+            <section class="ml-section" id="ml-section">
+                <div class="ml-section-head">
+                    <h2>机器学习分析区 <span style="color:#7a8699;font-size:10px">(评价 / 推演 / 调度 / 助手)</span></h2>
+                    <button id="ml-toggle" type="button">收起</button>
+                </div>
+                <div class="ml-section-grid">
+                    <article class="panel wide ml-review">
+                        <h2>评价标签分析 <span style="color:#557da4;font-size:10px">(ReviewTag · 五维评分 + 高频标签)</span></h2>
+                        <div class="review-wrap">
+                            <div id="review-radar" class="review-radar"></div>
+                            <div class="review-side">
+                                <div id="review-tags" class="review-tags"></div>
+                                <div class="muted" id="review-count" style="font-size:10px;margin-top:6px"></div>
+                            </div>
+                        </div>
+                    </article>
+                    <article class="panel ml-whatif">
+                        <h2>What-If 决策推演 <span style="color:#557da4;font-size:10px">(增桩/调价/客流)</span></h2>
+                        <div id="whatif-panel" class="whatif"></div>
+                    </article>
+                    <article class="panel ml-dispatch">
+                        <h2>智能调度建议 <span style="color:#557da4;font-size:10px">(Dispatch · 规则引擎)</span></h2>
+                        <div id="dispatch-panel" class="dispatch"></div>
+                    </article>
+                    <article class="panel wide ml-ai">
+                        <h2>AI 运营助手 <span style="color:#557da4;font-size:10px">(模板问答 · 实时数据)</span></h2>
+                        <div id="assistant-panel" class="assistant"></div>
+                    </article>
+                </div>
             </section>
         </main>
     </div>
@@ -123,6 +162,7 @@
     <script src="js/app.js"></script>
     <script src="js/analysis.js"></script>
     <script src="js/ml.js"></script>
+    <script src="js/sitemap.js"></script>
 </body>
 
 </html>

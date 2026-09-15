@@ -789,3 +789,432 @@ select {
     color: var(--muted);
     line-height: 1.5
 }
+
+/* ===== 评价标签分析 + 智能调度建议 ===== */
+.ml-review {
+    height: 320px
+}
+
+.review-wrap {
+    display: flex;
+    gap: 16px;
+    height: 100%
+}
+
+.review-radar {
+    flex: 0 0 46%;
+    height: 250px
+}
+
+.review-side {
+    flex: 1;
+    min-width: 0;
+    padding-top: 4px
+}
+
+.review-tags {
+    display: grid;
+    gap: 6px
+}
+
+.rtag {
+    display: grid;
+    grid-template-columns: 74px minmax(0, 1fr) 30px;
+    gap: 8px;
+    align-items: center;
+    font-size: 11px
+}
+
+.rtag-name {
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis
+}
+
+.rtag-bar {
+    height: 8px;
+    border-radius: 4px;
+    background: #edf1f5;
+    overflow: hidden
+}
+
+.rtag-fill {
+    height: 100%;
+    border-radius: 4px;
+    background: linear-gradient(90deg, var(--blue2), var(--blue))
+}
+
+.rtag-count {
+    color: var(--text);
+    text-align: right;
+    font-variant-numeric: tabular-nums
+}
+
+.ml-dispatch {
+    height: 320px
+}
+
+.dispatch {
+    display: grid;
+    gap: 8px;
+    padding-top: 2px
+}
+
+.dispatch-card {
+    border: 1px solid var(--border);
+    border-left-width: 3px;
+    border-radius: 8px;
+    padding: 9px 11px;
+    background: #fafbfd;
+    display: flex;
+    flex-direction: column;
+    gap: 3px
+}
+
+.dispatch-card strong {
+    font-size: 12px;
+    color: #31405a
+}
+
+.dispatch-card span {
+    font-size: 11px;
+    color: var(--muted);
+    line-height: 1.45
+}
+
+.dispatch-card.warn {
+    border-left-color: #d99a4e
+}
+
+.dispatch-card.info {
+    border-left-color: var(--blue)
+}
+
+.dispatch-card.ok {
+    border-left-color: var(--green)
+}
+
+/* ===== 充电效率分析 + AI 运营助手 ===== */
+.ml-eff {
+    height: 320px
+}
+
+.ml-eff .chart {
+    height: 250px
+}
+
+.ml-ai {
+    height: 320px
+}
+
+.assistant {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+    padding-top: 4px
+}
+
+.qa-card {
+    background: #f7f9fc;
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    padding: 11px 13px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px
+}
+
+.qa-card strong {
+    font-size: 12px;
+    color: var(--blue)
+}
+
+.qa-card span {
+    font-size: 11px;
+    color: var(--text);
+    line-height: 1.5
+}
+
+/* ===== 大屏三栏布局（左实时栏 / 中主图 / 右指标栏）===== */
+.live-grid {
+    display: grid;
+    grid-template-columns: 264px minmax(0, 1fr) 264px;
+    gap: 14px;
+    align-items: start
+}
+
+.live-rail {
+    display: grid;
+    gap: 14px;
+    min-width: 0
+}
+
+.live-center {
+    display: grid;
+    gap: 14px;
+    min-width: 0
+}
+
+.center-duo {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    min-width: 0
+}
+
+.center-duo .panel {
+    height: 300px
+}
+
+.live-center .panel {
+    height: 320px
+}
+
+.live-center .panel.ml-heat {
+    height: 355px
+}
+
+.live-center .ml-heat .chart {
+    height: 250px
+}
+
+.live-rail .panel {
+    height: 320px
+}
+
+.live-rail .panel.alarm-panel,
+.live-rail .panel.event-panel {
+    height: 380px
+}
+
+.live-rail .panel.ml-health {
+    height: 440px
+}
+
+.live-rail .ml-health .chart {
+    height: 200px
+}
+
+.live-rail .ml-list {
+    height: 120px
+}
+
+.live-rail .panel.ml-eff {
+    height: 300px
+}
+
+.live-rail .ml-eff .chart {
+    height: 220px
+}
+
+/* ===== 机器学习分析区（可折叠）===== */
+.ml-section {
+    margin-top: 18px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: #fff;
+    padding: 12px 16px 16px;
+    box-shadow: var(--shadow)
+}
+
+.ml-section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px
+}
+
+.ml-section-head h2 {
+    margin: 0;
+    font-size: 14px;
+    color: #31405a;
+    display: flex;
+    align-items: center;
+    gap: 6px
+}
+
+.ml-section-head h2::before {
+    content: "";
+    width: 3px;
+    height: 14px;
+    border-radius: 2px;
+    background: linear-gradient(180deg, var(--blue), var(--blue2))
+}
+
+.ml-section-head button {
+    padding: 4px 14px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: #fff;
+    color: #495366;
+    cursor: pointer;
+    font-size: 11px
+}
+
+.ml-section-head button:hover {
+    border-color: var(--blue);
+    color: var(--blue)
+}
+
+.ml-section-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px
+}
+
+.ml-section-grid .panel {
+    height: 300px
+}
+
+.ml-section-grid .panel.wide {
+    grid-column: span 2
+}
+
+.ml-section.collapsed .ml-section-grid {
+    display: none
+}
+
+.ml-section .whatif-item {
+    margin-bottom: 7px
+}
+
+.ml-section .whatif-results {
+    gap: 6px
+}
+
+.ml-section .whatif-card {
+    padding: 6px 9px
+}
+
+.ml-section .whatif-card strong {
+    font-size: 15px
+}
+
+/* ===== 左栏窄列适配（告警/事件行两列紧凑布局，防文字错乱）===== */
+.live-rail .alarm-head,
+.live-rail .alarm-row {
+    grid-template-columns: 56px minmax(0, 1fr)
+}
+
+.live-rail .alarm-head span:nth-child(3) {
+    display: none
+}
+
+.live-rail .alarm-row {
+    grid-template-rows: auto auto;
+    row-gap: 2px
+}
+
+.live-rail .alarm-panel .alarm-row time {
+    grid-row: 1;
+    grid-column: 1;
+    white-space: nowrap
+}
+
+.live-rail .alarm-panel .alarm-row .alarm-target {
+    grid-row: 1;
+    grid-column: 2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis
+}
+
+.live-rail .alarm-panel .alarm-row .alarm-text {
+    grid-row: 2;
+    grid-column: 2
+}
+
+.live-rail .event-panel .alarm-row time {
+    white-space: nowrap
+}
+
+.live-rail .alarm-list {
+    height: 300px
+}
+
+/* ===== 充电站地图（点阵/地图双模式）===== */
+.live-center .panel.map-panel {
+    height: 480px
+}
+
+.map-panel h2 {
+    justify-content: space-between
+}
+
+.map-modes {
+    display: flex;
+    gap: 6px;
+    margin-left: auto
+}
+
+.map-modes button {
+    padding: 2px 10px;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: #fff;
+    color: #495366;
+    font-size: 10px;
+    cursor: pointer
+}
+
+.map-modes button.on {
+    border-color: var(--blue);
+    background: var(--blue);
+    color: #fff
+}
+
+.map-panel #station-map,
+.map-panel .map-canvas {
+    height: 420px;
+    width: 100%
+}
+
+.map-canvas {
+    border-radius: 8px;
+    overflow: hidden;
+    position: relative;
+    background: #edf2f8;
+    cursor: grab
+}
+
+.map-canvas.dragging {
+    cursor: grabbing
+}
+
+.map-canvas[hidden],
+#station-map[hidden] {
+    display: none !important
+}
+
+@media(max-width:1440px) {
+    .live-grid {
+        grid-template-columns: minmax(0, 1fr) 300px
+    }
+}
+
+@media(max-width:1100px) {
+    .live-grid {
+        grid-template-columns: 1fr
+    }
+
+    .live-rail {
+        grid-template-columns: repeat(2, minmax(0, 1fr))
+    }
+
+    .ml-section-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr))
+    }
+}
+
+@media(max-width:720px) {
+    .live-rail,
+    .center-duo,
+    .ml-section-grid {
+        grid-template-columns: 1fr
+    }
+
+    .ml-section-grid .panel.wide {
+        grid-column: auto
+    }
+}

@@ -23,8 +23,36 @@
           { station: "商业中心快充站", code: "B-009", health: 58, level: "medium", risk: 0.34 }
         ] },
       whatif: { avg_revenue_per_order: 11.6, avg_energy_per_order: 8.1, daily_orders: 168, daily_revenue: 1950,
-                peak_hour: 18, peak_demand: 72, queue: 6, charger_count: 38 }
+                peak_hour: 18, peak_demand: 72, queue: 6, charger_count: 38 },
+      review: { scores: [4.3, 4.0, 3.6, 4.4, 4.2], count: 156,
+        tags: [{ tag: "充电很快", count: 88 }, { tag: "位置好找", count: 64 }, { tag: "设备有点旧了", count: 41 }, { tag: "排队有点久", count: 35 }, { tag: "价格实惠", count: 30 }] },
+      dispatch: { idle_rate: 0.55, queue: 6, peak_util: 0.62, peak_hour: 18 },
+      eff: [{ name: "快充", count: 812, avg_duration: 48, avg_energy: 12.6 }, { name: "慢充", count: 210, avg_duration: 215, avg_energy: 18.9 }],
+      assistant: { today_revenue: 2450, today_orders: 168, busiest_station: "商业中心快充站", busiest_orders: 42, fault_count: 8, total_users: 8, peak_hour: 18, peak_demand: 72 },
+      load_trend: mockLoadTrend()
     };
+  }
+
+  function mockLoadTrend() {
+    var dates = [], lines = {}, pad = function (n) { return String(n).padStart(2, "0"); };
+    for (var k = 6; k >= 0; k--) {
+      var dt = new Date(2026, 8, 10 - k);
+      var date = "2026-" + pad(dt.getMonth() + 1) + "-" + pad(dt.getDate());
+      var arr = [];
+      for (var h = 0; h < 24; h++) {
+        var peak = Math.exp(-Math.pow((h - 8) / 2.5, 2)) * 260 + Math.exp(-Math.pow((h - 18) / 3, 2)) * 420;
+        var weekend = (dt.getDay() === 0 || dt.getDay() === 6) ? 0.78 : 1;
+        arr.push(Math.round(peak * weekend + Math.sin(h * 1.7 + k) * 18));
+      }
+      dates.push(date); lines[date] = arr;
+    }
+    var avg = [];
+    for (var h2 = 0; h2 < 24; h2++) {
+      var s = 0;
+      dates.forEach(function (d) { s += lines[d][h2]; });
+      avg.push(Math.round(s / dates.length));
+    }
+    return { dates: dates, lines: lines, avg: avg };
   }
 
   function renderHeat(rows) {
@@ -80,13 +108,105 @@
       info.className = "ml-info";
       info.textContent = r.station + " / " + r.code;
       var h = document.createElement("span");
-      h.className = "ml-health";
+      h.className = "ml-health-num";
       h.textContent = "健康 " + r.health;
       var lv = document.createElement("span");
       lv.className = "ml-level " + r.level;
       lv.textContent = LEVEL[r.level] || r.level;
       row.append(info, h, lv);
       el.appendChild(row);
+    });
+  }
+
+  function renderReview(review) {
+    review = review || { scores: [0, 0, 0, 0, 0], count: 0, tags: [] };
+    window.ScreenCharts && window.ScreenCharts.reviewRadar(review.scores);
+    var el = byId("review-tags");
+    if (!el) return;
+    el.replaceChildren();
+    var tags = review.tags || [];
+    var max = 1;
+    tags.forEach(function (t) { if (t.count > max) max = t.count; });
+    if (!tags.length) {
+      var e = document.createElement("div");
+      e.className = "empty";
+      e.textContent = "暂无评价标签";
+      el.appendChild(e);
+    }
+    tags.forEach(function (t) {
+      var row = document.createElement("div");
+      row.className = "rtag";
+      var label = document.createElement("span");
+      label.className = "rtag-name";
+      label.textContent = t.tag;
+      var bar = document.createElement("div");
+      bar.className = "rtag-bar";
+      var fill = document.createElement("div");
+      fill.className = "rtag-fill";
+      fill.style.width = Math.round(t.count / max * 100) + "%";
+      bar.appendChild(fill);
+      var n = document.createElement("span");
+      n.className = "rtag-count";
+      n.textContent = t.count;
+      row.append(label, bar, n);
+      el.appendChild(row);
+    });
+    var c = byId("review-count");
+    if (c) c.textContent = "共 " + review.count + " 条评价 · 五维均分";
+  }
+
+  function renderDispatch(d) {
+    d = d || {};
+    var el = byId("dispatch-panel");
+    if (!el) return;
+    el.replaceChildren();
+    var idle = Math.round((d.idle_rate || 0) * 100);
+    var util = Math.round((d.peak_util || 0) * 100);
+    var items = [];
+    if (idle < 20) items.push({ lv: "warn", title: "空闲率偏低 " + idle + "%（<20%）", text: "触发 A4 运营告警 + A1 提升附近 3km 空闲站推荐权重" });
+    if ((d.queue || 0) > 5) items.push({ lv: "warn", title: "排队人数 " + d.queue + "（>5）", text: "触发 A3 拥堵站充电积分×2 + A2 向排队用户推送立减券引流" });
+    if (util > 90) items.push({ lv: "info", title: "高峰 " + (d.peak_hour || "-") + " 时预测利用率 " + util + "%", text: "提前调配电力，引导错峰充电" });
+    if (!items.length) items.push({ lv: "ok", title: "当前运行平稳", text: "空闲率 " + idle + "% · 排队 " + (d.queue || 0) + " · 高峰利用率 " + util + "%，无需调度动作" });
+    items.forEach(function (it) {
+      var card = document.createElement("div");
+      card.className = "dispatch-card " + it.lv;
+      var t = document.createElement("strong");
+      t.textContent = it.title;
+      var s = document.createElement("span");
+      s.textContent = it.text;
+      card.append(t, s);
+      el.appendChild(card);
+    });
+  }
+
+  function renderEff(items) {
+    window.ScreenCharts && window.ScreenCharts.chargeEff(items || []);
+  }
+
+  function renderLoadTrend(t) {
+    window.ScreenCharts && window.ScreenCharts.loadTrend(t || {});
+  }
+
+  function renderAssistant(a) {
+    a = a || {};
+    var el = byId("assistant-panel");
+    if (!el) return;
+    el.replaceChildren();
+    var qa = [
+      ["问：今日营收多少？", "答：今日营收 ¥" + fmt(a.today_revenue, 0) + "，共 " + fmt(a.today_orders) + " 笔订单"],
+      ["问：哪个站最忙？", "答：最繁忙站点是「" + (a.busiest_station || "—") + "」，已处理 " + fmt(a.busiest_orders) + " 笔订单"],
+      ["问：有多少设备故障？", "答：当前 " + fmt(a.fault_count) + " 台设备故障，其中高风险已标红并触发告警"],
+      ["问：用户与高峰情况？", "答：累计注册用户 " + fmt(a.total_users) + " 人；预测今晚 " + (a.peak_hour || "-") + " 时进入高峰（" + fmt(a.peak_demand) + " 单/时）"]
+    ];
+    qa.forEach(function (p) {
+      var card = document.createElement("div");
+      card.className = "qa-card";
+      var q = document.createElement("strong");
+      q.textContent = p[0];
+      var ans = document.createElement("span");
+      ans.textContent = p[1];
+      card.append(q, ans);
+      el.appendChild(card);
     });
   }
 
@@ -188,6 +308,11 @@
     renderSurge(res.top_surge);
     renderHealth(res.health);
     whatifDOM(res.whatif);
+    renderReview(res.review);
+    renderDispatch(res.dispatch);
+    renderEff(res.eff);
+    renderAssistant(res.assistant);
+    renderLoadTrend(res.load_trend);
   }
 
   if (document.readyState === "loading") {

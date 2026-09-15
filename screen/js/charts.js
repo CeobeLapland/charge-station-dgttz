@@ -140,13 +140,14 @@
                 tooltip: {
                     position: "top", backgroundColor: "#fff", borderColor: "#ddd",
                     textStyle: { color: "#333" }, formatter: p => { const idx = p.data[1]; return `${yData[idx]} ${p.data[0]}时<br>订单需求：${p.data[2]}` }
-                }, grid: { left: 40, right: 56, top: 8, bottom: 46 }, xAxis: { type: "category", data: hours, axisLabel: { color: label, fontSize: 9, interval: 2 }, splitArea: { show: true } }, yAxis: {
+                }, grid: { left: 40, right: 56, top: 8, bottom: 52 }, xAxis: { type: "category", data: hours, axisLabel: { color: label, fontSize: 9, interval: 2 }, splitArea: { show: true } }, yAxis: {
                     type: "category", data: yData,
                     axisLabel: { color: label, fontSize: 10 }, splitArea: { show: true }
                 }, visualMap: {
                     min: 0, max: max, calculable: false, orient: "horizontal",
-                    left: "center", bottom: 2, itemWidth: 120,
-                    itemHeight: 10, textStyle: { fontSize: 9, color: label }, inRange: { color: ["#eef4fa", "#8ca5bb", "#aa6269"] }
+                    left: "center", bottom: 6, itemWidth: 25,
+                    itemHeight: 300, text: ["高", "低"],
+                    textStyle: { fontSize: 10, color: label }, inRange: { color: ["#eef4fa", "#8ca5bb", "#aa6269"] }
                 },
                 series: [{
                     type: "heatmap", data: data, label: { show: false },
@@ -170,6 +171,55 @@
                 }]
             },
                 true)
+        }, chargeEff(items) {
+            items = items || [];
+            get("eff-chart")?.setOption({
+                ...base,
+                grid: { left: 42, right: 10, top: 26, bottom: 26 },
+                xAxis: { ...base.xAxis, type: "category", data: items.map(x => x.name), axisLabel: { color: label, fontSize: 10 } },
+                yAxis: { ...base.yAxis, type: "value", name: "平均时长(分)", nameTextStyle: { color: label, fontSize: 9 }, nameLocation: "middle", nameGap: 26 },
+                tooltip: {
+                    trigger: "axis", backgroundColor: "#fff", borderColor: "#ddd", textStyle: { color: "#333" },
+                    formatter: p => {
+                        const d = items[p[0].dataIndex] || {};
+                        return `${d.name || ""}<br>平均时长：${d.avg_duration ?? 0} 分钟<br>平均电量：${d.avg_energy ?? 0} kWh<br>订单量：${d.count ?? 0} 单`;
+                    }
+                },
+                series: [{
+                    type: "bar", data: items.map(x => x.avg_duration), barWidth: 26,
+                    itemStyle: { color: "#8ca5bb", borderRadius: [4, 4, 0, 0] },
+                    label: { show: true, position: "top", formatter: p => (p.value ?? 0) + " 分", fontSize: 10, color: label }
+                }]
+            }, true)
+        }, loadTrend(t) {
+            t = t || {};
+            const dates = t.dates || [];
+            const lines = t.lines || {};
+            const hours = Array.from({ length: 24 }, (_, h) => h + "时");
+            const today = dates[dates.length - 1] || "";
+            const series = [];
+            dates.forEach(function (d) {
+                if (d === today) return;
+                series.push({ name: d, type: "line", data: lines[d] || [], smooth: true, showSymbol: false, lineStyle: { color: "#d3dee8", width: 1.2 }, emphasis: { disabled: true }, tooltip: { show: true } });
+            });
+            series.push({ name: today, type: "line", data: lines[today] || [], smooth: true, showSymbol: false, lineStyle: { color: red, width: 2.6 }, areaStyle: { color: "rgba(170,98,105,0.10)" } });
+            series.push({ name: "7日均线", type: "line", data: t.avg || [], smooth: true, showSymbol: false, lineStyle: { color: blue, width: 2, type: "dashed" } });
+            get("load-trend-chart")?.setOption({
+                ...base,
+                xAxis: { ...base.xAxis, type: "category", data: hours, boundaryGap: false, axisPointer: { show: true, lineStyle: { color: "#c5cfda" } } },
+                yAxis: { ...base.yAxis, type: "value", name: "kW", nameTextStyle: { color: label } },
+                legend: { right: 4, top: 0, itemWidth: 14, itemHeight: 8, textStyle: { fontSize: 9, color: label }, data: [today, "7日均线"] },
+                tooltip: { trigger: "axis", backgroundColor: "#fff", borderColor: "#ddd", textStyle: { color: "#333" } },
+                series: series
+            }, true)
+        }, reviewRadar(scores) {
+            scores = scores || [0, 0, 0, 0, 0];
+            const dims = ["充电速度", "设备状况", "停车便利", "卫生环境", "服务质量"];
+            get("review-radar")?.setOption({
+                tooltip: { trigger: "item", backgroundColor: "#fff", borderColor: "#ddd", textStyle: { color: "#333" } },
+                radar: { indicator: dims.map(d => ({ name: d, max: 5 })), radius: "62%", splitNumber: 5, axisName: { color: label, fontSize: 10 }, splitLine: { lineStyle: { color: "#e3e8ee" } }, splitArea: { show: false }, axisLine: { lineStyle: { color: "#e3e8ee" } } },
+                series: [{ type: "radar", data: [{ value: scores, areaStyle: { color: "rgba(85,125,164,0.25)" }, lineStyle: { color: blue, width: 2 }, itemStyle: { color: blue } }] }]
+            }, true)
         }, resize() { pool.forEach(c => c.resize()) }
     }; window.addEventListener("resize", () => window.ScreenCharts.resize());
 }());

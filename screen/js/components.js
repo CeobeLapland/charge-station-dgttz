@@ -2,6 +2,7 @@
     "use strict";
     const $ = id => document.getElementById(id), fmt = (v, d = 0) => Number(v ?? 0).toLocaleString("zh-CN", { maximumFractionDigits: d });
     class MetricCards {
+        constructor() { this._vals = {} }
         render(m) {
             const defs = [
                 ["充电站总数", "station_count", "座", 0],
@@ -10,6 +11,7 @@
                 ["今日充电量", "today_energy_kwh", "kWh", 1],
                 ["今日订单数", "today_orders", "笔", 0],
                 ["今日收入", "today_revenue", "元", 2]]
+            const that = this;
             $("metric-cards").replaceChildren(...defs.map(([n, k, u, d]) => {
                 const a = document.createElement("article")
                 a.className = "metric-card";
@@ -19,8 +21,17 @@
                 v.className = "metric-value";
                 s.className = "metric-unit";
                 l.textContent = n;
-                v.textContent = fmt(m[k], d);
                 s.textContent = u;
+                // 数字滚动动画：从旧值缓动到新值
+                const target = Number(m[k] ?? 0), start = that._vals[k] ?? 0;
+                that._vals[k] = target;
+                v.textContent = fmt(start, d);
+                const t0 = performance.now(), dur = 750;
+                (function step(t) {
+                    const p = Math.min(1, (t - t0) / dur), eased = 1 - Math.pow(1 - p, 3);
+                    v.textContent = fmt(start + (target - start) * eased, d);
+                    if (p < 1) requestAnimationFrame(step)
+                })(t0);
                 a.append(l, v, s);
                 return a
             }))
@@ -31,7 +42,12 @@
     }
     class OrderTrendChart {
         render(d) { ScreenCharts.orders(d) }
-    } class EnergyRevenueChart { render(d) { ScreenCharts.energyRevenue(d) } } class StationRankChart { render(d) { ScreenCharts.rank(d) } } class StationMap { render(d) { ScreenCharts.map(d) } }
+    } class EnergyRevenueChart { render(d) { ScreenCharts.energyRevenue(d) } } class StationRankChart { render(d) { ScreenCharts.rank(d) } } class StationMap {
+        render(d) {
+            if (window.ScreenMap) window.ScreenMap.setData(d);
+            else window._pendingMap = d;
+        }
+    }
     class AlarmList {
         render(items) {
             const el = $("alarm-list");
