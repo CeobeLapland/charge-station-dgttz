@@ -27,6 +27,23 @@
     location.href = "/index.html?mode=" + next;
   };
   refreshModePill();
+  // 机器学习分析区折叠（记忆选择，展开时重算图表尺寸）
+  const mlSection = byId("ml-section"), mlToggle = byId("ml-toggle");
+  if (mlSection && mlToggle) {
+    let mlCollapsed = false;
+    try { mlCollapsed = localStorage.getItem("ml_collapsed") === "1"; } catch (e) { }
+    const applyMl = () => {
+      mlSection.classList.toggle("collapsed", mlCollapsed);
+      mlToggle.textContent = mlCollapsed ? "展开" : "收起";
+      window.ScreenCharts && window.ScreenCharts.resize();
+    };
+    mlToggle.onclick = () => {
+      mlCollapsed = !mlCollapsed;
+      try { localStorage.setItem("ml_collapsed", mlCollapsed ? "1" : "0"); } catch (e) { }
+      applyMl();
+    };
+    applyMl();
+  }
   if (ScreenConfig.mode === "live") {
     // 从网关 /api/snapshot 拉 Hive 聚合数据（WebSocket 服务端未运行，改用 HTTP），支持筛选
     const loadHiveData = (filters) => {

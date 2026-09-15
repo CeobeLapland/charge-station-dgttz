@@ -935,3 +935,190 @@ select {
     color: var(--text);
     line-height: 1.5
 }
+
+/* ===== 大屏三栏布局（左实时栏 / 中主图 / 右指标栏）===== */
+.live-grid {
+    display: grid;
+    grid-template-columns: 264px minmax(0, 1fr) 264px;
+    gap: 14px;
+    align-items: start
+}
+
+.live-rail {
+    display: grid;
+    gap: 14px;
+    min-width: 0
+}
+
+.live-center {
+    display: grid;
+    gap: 14px;
+    min-width: 0
+}
+
+.center-duo {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    min-width: 0
+}
+
+.center-duo .panel {
+    height: 300px
+}
+
+.live-center .panel {
+    height: 320px
+}
+
+.live-center .panel.ml-heat {
+    height: 355px
+}
+
+.live-center .ml-heat .chart {
+    height: 250px
+}
+
+.live-rail .panel {
+    height: 320px
+}
+
+.live-rail .panel.alarm-panel,
+.live-rail .panel.event-panel {
+    height: 380px
+}
+
+.live-rail .panel.ml-health {
+    height: 440px
+}
+
+.live-rail .ml-health .chart {
+    height: 200px
+}
+
+.live-rail .ml-list {
+    height: 120px
+}
+
+.live-rail .panel.ml-eff {
+    height: 300px
+}
+
+.live-rail .ml-eff .chart {
+    height: 220px
+}
+
+/* ===== 机器学习分析区（可折叠）===== */
+.ml-section {
+    margin-top: 18px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: #fff;
+    padding: 12px 16px 16px;
+    box-shadow: var(--shadow)
+}
+
+.ml-section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px
+}
+
+.ml-section-head h2 {
+    margin: 0;
+    font-size: 14px;
+    color: #31405a;
+    display: flex;
+    align-items: center;
+    gap: 6px
+}
+
+.ml-section-head h2::before {
+    content: "";
+    width: 3px;
+    height: 14px;
+    border-radius: 2px;
+    background: linear-gradient(180deg, var(--blue), var(--blue2))
+}
+
+.ml-section-head button {
+    padding: 4px 14px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: #fff;
+    color: #495366;
+    cursor: pointer;
+    font-size: 11px
+}
+
+.ml-section-head button:hover {
+    border-color: var(--blue);
+    color: var(--blue)
+}
+
+.ml-section-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px
+}
+
+.ml-section-grid .panel {
+    height: 300px
+}
+
+.ml-section-grid .panel.wide {
+    grid-column: span 2
+}
+
+.ml-section.collapsed .ml-section-grid {
+    display: none
+}
+
+.ml-section .whatif-item {
+    margin-bottom: 7px
+}
+
+.ml-section .whatif-results {
+    gap: 6px
+}
+
+.ml-section .whatif-card {
+    padding: 6px 9px
+}
+
+.ml-section .whatif-card strong {
+    font-size: 15px
+}
+
+@media(max-width:1440px) {
+    .live-grid {
+        grid-template-columns: minmax(0, 1fr) 300px
+    }
+}
+
+@media(max-width:1100px) {
+    .live-grid {
+        grid-template-columns: 1fr
+    }
+
+    .live-rail {
+        grid-template-columns: repeat(2, minmax(0, 1fr))
+    }
+
+    .ml-section-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr))
+    }
+}
+
+@media(max-width:720px) {
+    .live-rail,
+    .center-duo,
+    .ml-section-grid {
+        grid-template-columns: 1fr
+    }
+
+    .ml-section-grid .panel.wide {
+        grid-column: auto
+    }
+}
