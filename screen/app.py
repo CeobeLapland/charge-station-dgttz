@@ -13,6 +13,7 @@
 import sys
 import json
 import os
+import threading
 import http.server
 import subprocess
 import urllib.parse
@@ -107,6 +108,160 @@ def run_spark_sql(sql, timeout=180):
             rows = [r.split("\t") for r in clean[1:] if r.strip()]
     return True, cols, rows, ""
 
+# ================= 开发者模式（/admin）辅助 =================
+# 说明：所有管理员操作都走 beeline（HiveServer2），不做 SQL 注入面——
+#       表名一律用 show tables 白名单，值一律转义单引号。
+
+def _beeline_lines(sql, timeout=240):
+    """执行一句 Hive SQL，返回过滤噪声后的原始行列表（用于 /admin 自己解析）"""
+    if not os.path.exists(BEELINE):
+        return []
+    cmd = [BEELINE, "-u", HS2_URI, "-n", HS2_USER, "--silent=true", "--outputformat=tsv2", "-e", sql]
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except Exception:
+        return []
+    out = []
+    for l in (p.stdout or "").splitlines():
+        s = l.strip()
+        if not s:
+            continue
+        if s == "OK" or s.startswith("Time taken") or s.startswith("WARN") \
+           or s.startswith("SLF4J") or s.startswith("log4j") or s.startswith("Setting default") \
+           or "To adjust logging level" in s or s.startswith("Beeline version"):
+            continue
+        out.append(l.rstrip("\n"))
+    return out
+
+_ADMIN_TABLES = {"ts": 0.0, "names": []}
+
+def _read_dash_cache():
+    """读大屏预聚合缓存（dash_cache.json），读不到返回 {}"""
+    try:
+        p = os.path.join(SCREEN_DIR, "dash_cache.json")
+        if os.path.exists(p):
+            with open(p, encoding="utf-8") as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+def admin_table_names(force=False):
+    """列出 chargestation 库下的业务表名（排除 _ 开头临时表），300s 缓存"""
+    now = _time.time()
+    if not force and _ADMIN_TABLES["names"] and now - _ADMIN_TABLES["ts"] < 300:
+        return list(_ADMIN_TABLES["names"])
+    names = []
+    for l in _beeline_lines("show tables in chargestation;"):
+        parts = l.split("\t")
+        name = (parts[0] or "").strip()
+        if name and name != "tab_name" and not name.startswith("_"):
+            names.append(name)
+    names.sort()
+    _ADMIN_TABLES.update(ts=now, names=names)
+    return names
+
+def admin_table_cols(table):
+    """返回表的列名列表（DESCRIBE）"""
+    cols = []
+    for l in _beeline_lines("describe chargestation.%s;" % table, timeout=120):
+        parts = l.split("\t")
+        name = (parts[0] or "").strip()
+        if not name or name == "col_name" or name.startswith("#"):
+            continue
+        if len(parts) < 2 or not (parts[1] or "").strip():
+            continue
+        cols.append(name)
+    return cols
+
+_ADMIN_COUNTS = {"ts": 0.0, "counts": {}}
+
+def admin_row_counts(tables):
+    """多表行数。三级加速：
+    1) dash_cache.json 的 table_counts（dash_engine 单 Spark 会话算好，秒回）
+    2) spark-sql 单会话批量算（起一次 JVM，约 30~60s），内存缓存 10 分钟
+    3) beeline 兜底（30 个 MR 串行，很慢，仅保证可用）
+    """
+    if not tables:
+        return {}
+    # 1) 预聚合缓存
+    ce = _read_dash_cache()
+    if ce.get("table_counts"):
+        m = {}
+        for r in ce["table_counts"]:
+            try:
+                m[str(r[0])] = int(r[1])
+            except Exception:
+                continue
+        if m:
+            return {t: m.get(t) for t in tables}
+    # 2) spark 单会话批量 + 内存缓存
+    now = _time.time()
+    if _ADMIN_COUNTS["counts"] and now - _ADMIN_COUNTS["ts"] < 600:
+        return {t: _ADMIN_COUNTS["counts"].get(t) for t in tables}
+    sql = ";".join("select '%s' as t, count(*) as c from chargestation.%s" % (t, t) for t in tables)
+    ok, _, rows, err = run_spark_sql(sql)
+    out = {}
+    if ok:
+        for r in (rows or []):
+            if len(r) >= 2:
+                t, c = r[0].strip(), r[1].strip()
+                if t in tables and c.isdigit():
+                    out[t] = int(c)
+        if out:
+            _ADMIN_COUNTS.update(ts=now, counts=out)
+            return out
+    # 3) beeline 兜底
+    sql = ";".join("select '%s' as t, count(*) as c from chargestation.%s" % (t, t) for t in tables)
+    out = {}
+    for l in _beeline_lines(sql, timeout=300):
+        parts = l.split("\t")
+        if len(parts) >= 2:
+            t, c = parts[0].strip(), parts[1].strip()
+            if t in tables and c.isdigit():
+                out[t] = int(c)
+    return out
+
+def _esc_sql(v):
+    """SQL 字符串字面量转义（单引号翻倍）"""
+    return str(v).replace("'", "''")
+
+def _parse_multipart(body, boundary):
+    """解析 multipart/form-data 原始字节 -> (fields: dict, files: dict[filename->(name, bytes]))"""
+    fields, files = {}, {}
+    sep = ("--" + boundary).encode("utf-8")
+    for part in body.split(sep):
+        part = part.strip(b"\r\n")
+        if not part or part == b"--":
+            continue
+        head, _, content = part.partition(b"\r\n\r\n")
+        head_text = head.decode("utf-8", "ignore")
+        name = filename = None
+        for line in head_text.split("\r\n"):
+            if line.lower().startswith("content-disposition"):
+                for seg in line.split(";"):
+                    seg = seg.strip()
+                    if seg.startswith('name="'):
+                        name = seg[6:-1]
+                    elif seg.startswith("filename="):
+                        filename = seg[9:].strip().strip('"')
+        if name is None:
+            continue
+        if filename is not None:
+            files[name] = (filename, content)
+        else:
+            fields[name] = content.decode("utf-8", "ignore")
+    return fields, files
+
+def _json_reply(handler, payload):
+    body = json.dumps(payload, ensure_ascii=False)
+    handler.send_response(200)
+    handler.send_header("Content-Type", "application/json; charset=utf-8")
+    handler.send_header("Cache-Control", "no-store")
+    handler.end_headers()
+    handler.wfile.write(body.encode("utf-8"))
+
+
 INDEX_PAGE = """<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Hadoop / Hive 查询演示</title>
 <style>
@@ -123,6 +278,7 @@ button:hover{background:#1e40af}
 a{color:#7dd3fc}
 </style></head><body>
 <h1>Big Data 演示 · Hadoop + Hive 查询网关</h1>
+<div style="margin-bottom:8px;font-size:12px"><a href="/index.html">← 返回大屏</a> ｜ <a href="/admin">开发者模式</a></div>
 <div class="status">HiveServer2: <b>{HS2_URI}</b> ｜ 用户: <b>{HS2_USER}</b></div>
 <h3>常用演示查询（点击即执行，或自行输入 SQL）：</h3>
 <div id="quick">
@@ -535,6 +691,40 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
+        if parsed.path == "/admin":
+            # 开发者模式页（screen/admin.html）
+            p = os.path.join(SCREEN_DIR, "admin.html")
+            if os.path.exists(p):
+                with open(p, encoding="utf-8") as f:
+                    html = f.read()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(html.encode("utf-8"))
+                return
+            self.send_response(404); self.end_headers(); self.wfile.write(b"admin.html not found")
+            return
+        if parsed.path == "/api/admin/tables":
+            try:
+                tables = admin_table_names()
+                counts = admin_row_counts(tables)
+                _json_reply(self, {"ok": True, "tables": [{"name": t, "count": counts.get(t)} for t in tables],
+                                   "updated": _time.strftime("%H:%M:%S")})
+            except Exception as e:
+                _json_reply(self, {"ok": False, "message": str(e)})
+            return
+        if parsed.path == "/api/admin/describe":
+            q = urllib.parse.parse_qs(parsed.query)
+            table = (q.get("table") or [""])[0].strip()
+            if table not in admin_table_names():
+                _json_reply(self, {"ok": False, "message": "表不存在或不在允许列表：" + table})
+                return
+            try:
+                cols = admin_table_cols(table)
+                _json_reply(self, {"ok": True, "table": table, "cols": cols})
+            except Exception as e:
+                _json_reply(self, {"ok": False, "message": str(e)})
+            return
         if parsed.path == "/hadoop":
             # 用 replace 而非 format，避免 CSS 大括号被误当占位符
             html = INDEX_PAGE.replace("{HS2_URI}", HS2_URI).replace("{HS2_USER}", HS2_USER)
@@ -584,6 +774,130 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         super().do_GET()
 
     def do_POST(self):
+        if self.path == "/api/admin/insert":
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length).decode("utf-8", "ignore")
+            try:
+                data = json.loads(body)
+            except Exception:
+                data = {}
+            table = (data.get("table") or "").strip()
+            values = data.get("values") or {}
+            if table not in admin_table_names():
+                _json_reply(self, {"ok": False, "message": "表不存在或不在允许列表：" + table}); return
+            try:
+                cols = admin_table_cols(table)
+                if not cols:
+                    _json_reply(self, {"ok": False, "message": "无法读取表结构"}); return
+                vals = ["'" + _esc_sql(values.get(c, "")) + "'" for c in cols]
+                sql = "insert into table chargestation.%s (%s) values (%s);" % (table, ", ".join(cols), ", ".join(vals))
+                ok, _, _, _, err = run_hive_sql(sql)
+                if not ok:
+                    # 兼容不支持列名 VALUES 的老版本 Hive：不带列名全列插入
+                    ok2, _, _, _, err2 = run_hive_sql("insert into table chargestation.%s values (%s);" % (table, ", ".join(vals)))
+                    if not ok2:
+                        _json_reply(self, {"ok": False, "message": "插入失败：" + (err2 or err)}); return
+                _json_reply(self, {"ok": True, "message": "已向 %s 插入 1 条（重建大屏缓存后生效）" % table})
+            except Exception as e:
+                _json_reply(self, {"ok": False, "message": str(e)})
+            return
+        if self.path == "/api/admin/import":
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length)
+            ct = self.headers.get("Content-Type", "")
+            boundary = ""
+            for seg in ct.split(";"):
+                seg = seg.strip()
+                if seg.startswith("boundary="):
+                    boundary = seg[9:].strip().strip('"')
+            if not boundary:
+                _json_reply(self, {"ok": False, "message": "缺少 multipart boundary"}); return
+            try:
+                fields, files = _parse_multipart(body, boundary)
+            except Exception as e:
+                _json_reply(self, {"ok": False, "message": "解析上传失败：" + str(e)}); return
+            table = (fields.get("table") or "").strip()
+            fmt = (fields.get("format") or "tsv").strip().lower()
+            mode = (fields.get("mode") or "append").strip().lower()
+            if table not in admin_table_names():
+                _json_reply(self, {"ok": False, "message": "表不存在或不在允许列表：" + table}); return
+            if not files:
+                _json_reply(self, {"ok": False, "message": "未收到文件"}); return
+            fname, content = next(iter(files.values()))
+            if not content:
+                _json_reply(self, {"ok": False, "message": "文件为空"}); return
+            try:
+                cols = admin_table_cols(table)
+                if not cols:
+                    _json_reply(self, {"ok": False, "message": "无法读取表结构"}); return
+                delim = "\t" if fmt == "tsv" else ","
+                text = content.decode("utf-8", "ignore")
+                first = next((l for l in text.splitlines() if l.strip()), "")
+                n = len(first.split(delim))
+                if n != len(cols):
+                    _json_reply(self, {"ok": False, "message": "列数不匹配：文件首行 %d 列，表 %s 共 %d 列（%s），请按表列顺序准备文件" % (n, table, len(cols), ",".join(cols[:6]) + ("…" if len(cols) > 6 else ""))}); return
+                path = "/tmp/admin_import_%d.%s" % (int(_time.time() * 1000), "tsv" if fmt == "tsv" else "csv")
+                with open(path, "wb") as f:
+                    f.write(content)
+                try:
+                    if fmt == "tsv":
+                        sql = "load data local inpath '%s' into%s table chargestation.%s;" % (path, " overwrite" if mode == "replace" else "", table)
+                        ok, _, _, _, err = run_hive_sql(sql)
+                        if not ok:
+                            _json_reply(self, {"ok": False, "message": "导入失败：" + err}); return
+                        nrows = len([l for l in text.splitlines() if l.strip()])
+                        _json_reply(self, {"ok": True, "message": "已导入 %d 行到 %s（请重建大屏缓存）" % (nrows, table)})
+                    else:
+                        tmp = "_admin_tmp_%d" % int(_time.time())
+                        run_hive_sql("drop table if exists chargestation.%s;" % tmp)
+                        cols_ddl = ", ".join("%s string" % c for c in cols)
+                        ok, _, _, _, err = run_hive_sql("create table chargestation.%s (%s) row format delimited fields terminated by ',';" % (tmp, cols_ddl))
+                        if not ok:
+                            _json_reply(self, {"ok": False, "message": "建临时表失败：" + err}); return
+                        ok, _, _, _, err = run_hive_sql("load data local inpath '%s' into table chargestation.%s;" % (path, tmp))
+                        if not ok:
+                            _json_reply(self, {"ok": False, "message": "装载临时表失败：" + err}); return
+                        ok, _, _, _, err = run_hive_sql("insert %s table chargestation.%s select * from chargestation.%s;" % ("overwrite" if mode == "replace" else "into", table, tmp))
+                        run_hive_sql("drop table if exists chargestation.%s;" % tmp)
+                        if not ok:
+                            _json_reply(self, {"ok": False, "message": "写入目标表失败：" + err}); return
+                        nrows = len([l for l in text.splitlines() if l.strip()])
+                        _json_reply(self, {"ok": True, "message": "已导入 %d 行到 %s（请重建大屏缓存）" % (nrows, table)})
+                finally:
+                    try:
+                        os.remove(path)
+                    except Exception:
+                        pass
+            except Exception as e:
+                _json_reply(self, {"ok": False, "message": str(e)})
+            return
+        if self.path == "/api/admin/clear":
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length).decode("utf-8", "ignore")
+            try:
+                data = json.loads(body)
+            except Exception:
+                data = {}
+            table = (data.get("table") or "").strip()
+            if table not in admin_table_names():
+                _json_reply(self, {"ok": False, "message": "表不存在或不在允许列表：" + table}); return
+            ok, _, _, _, err = run_hive_sql("truncate table chargestation.%s;" % table)
+            _json_reply(self, {"ok": ok, "message": ("已清空 %s（请重建大屏缓存）" % table) if ok else ("清空失败：" + err)})
+            return
+        if self.path == "/api/admin/rebuild":
+            out = os.path.join(SCREEN_DIR, "dash_cache.json")
+            eng = os.path.join(SCREEN_DIR, "dash_engine.py")
+            if not os.path.exists(eng):
+                _json_reply(self, {"ok": False, "message": "找不到 dash_engine.py"}); return
+            try:
+                def _run():
+                    subprocess.Popen([sys.executable, eng, out],
+                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                threading.Thread(target=_run, daemon=True).start()
+                _json_reply(self, {"ok": True, "message": "已触发大屏缓存重建（dash_engine.py），约 30~60 秒后大屏自动生效"})
+            except Exception as e:
+                _json_reply(self, {"ok": False, "message": str(e)})
+            return
         if self.path == "/api/hive":
             length = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(length).decode("utf-8", "ignore")

@@ -1,0 +1,172 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>开发者模式 · 数据管理台</title>
+<style>
+body{font-family:menlo,consolas,"Microsoft YaHei",monospace;background:#0f1626;color:#cde3ff;margin:0;padding:24px;font-size:13px}
+h1{font-size:20px;color:#7dd3fc;margin:0 0 4px}
+.sub{color:#7a8bab;font-size:12px;margin-bottom:14px}
+.sub a{color:#7dd3fc}
+.status{border:1px solid #1e3a5f;background:#0a1424;padding:8px 12px;border-radius:6px;margin-bottom:16px;font-size:12px;color:#9fb8d9}
+.card{background:#101a30;border:1px solid #1e3a5f;border-radius:8px;padding:16px 18px;margin-bottom:16px}
+.card h2{margin:0 0 12px;font-size:14px;color:#7dd3fc;display:flex;align-items:center;gap:8px}
+.card h2::before{content:"";width:3px;height:14px;background:#3b82f6;border-radius:2px}
+table{border-collapse:collapse;width:100%;font-size:12px}
+th,td{text-align:left;padding:7px 10px;border-bottom:1px solid #1a2842}
+th{color:#7a8bab;font-weight:500;font-size:11px}
+tr:hover td{background:#132040}
+.btn{background:#1d4ed8;color:#fff;border:0;padding:7px 16px;border-radius:6px;cursor:pointer;font-size:12px;margin-top:8px}
+.btn:hover{background:#1e40af}
+.btn.ghost{background:#16233c;border:1px solid #2a3f66;color:#cde3ff}
+.btn.danger{background:#8f2f2f;color:#fff}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+select,input[type=text],input[type=number],input[type=date],input[type=file],textarea{background:#0a1424;color:#cde3ff;border:1px solid #2a3f66;border-radius:6px;padding:7px 10px;font-size:12px;font-family:inherit}
+select,input[type=text],input[type=number],input[type=date]{width:200px}
+input[type=file]{width:auto}
+.form-row{display:flex;gap:12px;flex-wrap:wrap;align-items:end;margin-bottom:10px}
+.form-row label{display:grid;gap:5px;color:#8aa2c8;font-size:11px}
+.field-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px;margin-bottom:12px}
+.field-grid label{display:grid;gap:5px;color:#8aa2c8;font-size:11px}
+.field-grid input{width:100%}
+.msg{margin-top:10px;padding:8px 12px;border-radius:6px;font-size:12px;white-space:pre-wrap}
+.msg.ok{background:#0d2a1a;border:1px solid #1f5c3a;color:#7fe0a8}
+.msg.err{background:#2a1010;border:1px solid #7a2323;color:#ffb3b3}
+.muted{color:#7a8bab;font-size:11px}
+.count{color:#7fe0a8}
+.empty{color:#5b6f8f;text-align:center;padding:20px}
+#manual-form{margin-top:12px}
+#manual-fields{color:#7a8bab}
+.tag{display:inline-block;background:#132140;border:1px solid #2a3f66;border-radius:4px;padding:1px 7px;margin-right:6px;font-size:11px;color:#9fb8d9}
+</style></head><body>
+<h1>开发者模式 · 数据管理台</h1>
+<div class="sub">Hive <b>chargestation</b> 库 · 支持：查看行数 / 文件导入 / 手动添加 / 清空 / 重建大屏缓存 ｜ <a href="/index.html">← 返回大屏</a> ｜ <a href="/hadoop">Hadoop 查询</a></div>
+<div class="status">HiveServer2: <b>jdbc:hive2://node100:10000</b> ｜ 用户: <b>hadoop</b> ｜ 时间: <span id="now"></span></div>
+
+<div class="card">
+  <h2>① 数据表一览（行数统计走 Hive，小表秒级）</h2>
+  <div style="margin-bottom:8px"><button class="btn" onclick="loadTables(true)">刷新行数</button> <span class="muted" id="table-updated"></span></div>
+  <table><thead><tr><th style="width:60%">表名</th><th>行数</th><th style="width:130px">操作</th></tr></thead><tbody id="table-body"><tr><td colspan="3" class="empty">加载中…</td></tr></tbody></table>
+</div>
+
+<div class="card">
+  <h2>② 文件导入（CSV / TSV → Hive 表）</h2>
+  <div class="form-row">
+    <label>目标表<select id="imp-table" onchange="fillTables()"></select></label>
+    <label>文件格式<select id="imp-format"><option value="tsv">TSV（Tab 分隔，与表一致·推荐）</option><option value="csv">CSV（逗号分隔）</option></select></label>
+    <label>导入方式<select id="imp-mode"><option value="append">追加（INTO）</option><option value="replace">覆盖（OVERWRITE）</option></select></label>
+    <label>数据文件<input type="file" id="imp-file" accept=".tsv,.csv,.txt"></label>
+    <button class="btn" onclick="doImport()">上传导入</button>
+  </div>
+  <div class="muted">要求：文件<u>列顺序</u>与表结构一致、无表头；列数不符会报错。TSV 直接 LOAD 最快；CSV 走临时表转换（字段内不要含逗号）。</div>
+  <div class="msg" id="imp-msg" hidden></div>
+</div>
+
+<div class="card">
+  <h2>③ 手动添加数据（现场加几条，用于演示）</h2>
+  <div class="form-row">
+    <label>目标表<select id="man-table" onchange="loadCols()"></select></label>
+    <button class="btn ghost" onclick="loadCols(true)">读取字段</button>
+  </div>
+  <div id="manual-form" hidden>
+    <div class="muted" style="margin-bottom:8px">表字段（<span id="col-count"></span> 个，按列名插入，空值填 ''）：</div>
+    <div class="field-grid" id="manual-fields"></div>
+    <button class="btn" onclick="doInsert()">插入 1 条</button>
+    <div class="msg" id="ins-msg" hidden></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>④ 大屏缓存重建（改完数据必点）</h2>
+  <div class="muted" style="margin-bottom:8px">大屏读的是 <b>dash_cache.json</b>（Spark 预聚合缓存）。增删数据后需重新生成，约 30~60 秒，完成后刷新大屏页面即生效。</div>
+  <button class="btn" onclick="doRebuild()">重建大屏缓存</button>
+  <div class="msg" id="reb-msg" hidden></div>
+</div>
+
+<div class="muted">提示：导入/添加/清空仅操作 Hive 数据；管理端/用户端使用 MySQL 独立库，不受影响。清空操作不可恢复，请谨慎。</div>
+
+<script>
+var nowEl=document.getElementById("now");
+function tick(){nowEl.textContent=new Date().toLocaleTimeString("zh-CN",{hour12:false});}
+setInterval(tick,1000);tick();
+function $(id){return document.getElementById(id);}
+function msg(el,ok,text){el.hidden=false;el.className="msg "+(ok?"ok":"err");el.textContent=text;}
+async function api(url,opt){
+  var r=await fetch(url,opt);return await r.json();
+}
+function fillTables(){
+  var sel1=$("imp-table"),sel2=$("man-table");
+  var t=[].map.call(sel1.options,function(o){return o.value;});
+  sel2.innerHTML="";
+  t.forEach(function(v){var o=document.createElement("option");o.value=v;o.textContent=v;sel2.appendChild(o);});
+  if(sel2.value)loadCols();
+}
+async function loadTables(force){
+  var body=$("table-body");body.innerHTML='<tr><td colspan="3" class="empty">统计中…（首次稍慢）</td></tr>';
+  var res=await api("/api/admin/tables");
+  if(!res.ok){body.innerHTML='<tr><td colspan="3" class="empty">加载失败：'+res.message+'</td></tr>';return;}
+  var html="";
+  res.tables.forEach(function(t){
+    html+='<tr><td>'+t.name+'</td><td class="count">'+(t.count==null?"—":t.count)+'</td><td><button class="btn danger" onclick="doClear(\''+t.name+'\')">清空</button></td></tr>';
+  });
+  body.innerHTML=html||'<tr><td colspan="3" class="empty">（空库）</td></tr>';
+  $("table-updated").textContent="更新于 "+res.updated;
+  // 同步到导入/手动下拉
+  var sel1=$("imp-table"),sel2=$("man-table");
+  var prev1=sel1.value;
+  sel1.innerHTML="";sel2.innerHTML="";
+  res.tables.forEach(function(t){
+    [sel1,sel2].forEach(function(s){var o=document.createElement("option");o.value=t.name;o.textContent=t.name;s.appendChild(o);});
+  });
+  if(prev1&&res.tables.some(function(t){return t.name===prev1;}))sel1.value=prev1;
+  if(sel2.value)loadCols();
+}
+async function loadCols(force){
+  var t=$("man-table").value;
+  if(!t)return;
+  $("manual-form").hidden=true;
+  var res=await api("/api/admin/describe?table="+encodeURIComponent(t));
+  if(!res.ok){msg($("ins-msg"),false,"读取字段失败："+res.message);$("ins-msg").hidden=false;return;}
+  var f=$("manual-fields");f.innerHTML="";
+  res.cols.forEach(function(c){
+    var lab=document.createElement("label");
+    var sp=document.createElement("span");sp.textContent=c;
+    var inp=document.createElement("input");inp.type="text";inp.dataset.col=c;inp.placeholder="";
+    lab.appendChild(sp);lab.appendChild(inp);f.appendChild(lab);
+  });
+  $("col-count").textContent=res.cols.length;
+  $("manual-form").hidden=false;
+  $("ins-msg").hidden=true;
+}
+async function doInsert(){
+  var t=$("man-table").value;
+  var values={};
+  document.querySelectorAll("#manual-fields input").forEach(function(i){values[i.dataset.col]=i.value;});
+  $("ins-msg").hidden=false;$("ins-msg").className="msg";$("ins-msg").textContent="提交中…（Hive 执行约几秒）";
+  var res=await api("/api/admin/insert",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({table:t,values:values})});
+  msg($("ins-msg"),res.ok,res.message||"");
+  if(res.ok)loadTables(false);
+}
+async function doImport(){
+  var t=$("imp-table").value,f=$("imp-file").files[0];
+  if(!t){alert("请选择目标表");return;}
+  if(!f){alert("请选择文件");return;}
+  var fd=new FormData();
+  fd.append("table",t);fd.append("format",$("imp-format").value);fd.append("mode",$("imp-mode").value);fd.append("file",f);
+  var el=$("imp-msg");el.hidden=false;el.className="msg";el.textContent="上传并导入中…（Hive 执行，请稍候）";
+  try{
+    var res=await api("/api/admin/import",{method:"POST",body:fd});
+    msg(el,res.ok,res.message||"");
+    if(res.ok)loadTables(false);
+  }catch(e){msg(el,false,"请求失败："+e);}
+}
+async function doClear(t){
+  if(!confirm("确认清空表 "+t+" ？（不可恢复）"))return;
+  var res=await api("/api/admin/clear",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({table:t})});
+  alert(res.message);loadTables(false);
+}
+async function doRebuild(){
+  var el=$("reb-msg");el.hidden=false;el.className="msg";el.textContent="已提交，正在后台重建…";
+  var res=await api("/api/admin/rebuild",{method:"POST"});
+  msg(el,res.ok,res.message||"");
+}
+loadTables(false);
+</script>
+</body></html>

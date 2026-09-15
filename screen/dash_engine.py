@@ -60,6 +60,13 @@ result["total_energy"] = rows("select round(sum(o.energy_kwh),1) as e from charg
 result["today"] = rows("select count(*) as cnt, round(sum(o.energy_kwh),1) as kwh, round(sum(o.pay_amount),2) as inc from chargestation.charging_order o %s where 1=1%s%s" % (qr(), W_ORD_DIR or W_ORD, W_DT if W_ORD_DIR else ""))
 result["events"] = rows("select id, create_time, user_id, station_id from chargestation.charging_order where 1=1%s%s order by create_time desc limit 8" % (W_ORD_DIR, W_DT))
 
+# 各表行数（供 /admin 数据表一览秒回；同一 SparkSession 内 30 个 count 共享 JVM，秒级）
+try:
+    _tabs = [r[1] for r in spark.sql("show tables in chargestation").collect()]
+    result["table_counts"] = [[t, str(spark.sql("select count(*) as c from chargestation.%s" % t).collect()[0][0])] for t in _tabs if not str(t).startswith("_")]
+except Exception:
+    result["table_counts"] = []
+
 with open(OUT, "w", encoding="utf-8") as f:
     json.dump(result, f, ensure_ascii=False)
 print("DASH_ENGINE_OK", OUT, "region=%s sid=%s date=%s" % (REGION, SID, DATE))

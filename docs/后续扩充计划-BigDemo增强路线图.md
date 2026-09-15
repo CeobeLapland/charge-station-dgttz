@@ -11,7 +11,8 @@
 **演示环境**：CentOS7 虚拟机 `192.168.176.100`(node100)，用户/密码 `hadoop/hadoop`。SecureCRT 连接。
 **三入口**：
 - 大屏：`http://192.168.176.100:8080/index.html`（默认 mock；带 `?mode=live` 走 Hive 真实数据）
-- Hadoop 查询页：`http://192.168.176.100:8080/hadoop`（含 SPARK-SQL 多维分析按钮）
+- Hadoop 查询页：`http://192.168.176.100:8080/hadoop`（含 SPARK-SQL 多维分析按钮；已并入大屏弹窗，此页保留）
+- 开发者模式：`http://192.168.176.100:8080/admin`（数据表行数 / CSV·TSV 导入 / 手动添加 / 清空 / 重建大屏缓存）
 - Hadoop 官方 UI：HDFS `:9870`、YARN `:8088`
 
 **一键启动（关机重启后）**：见《Hadoop环境操作与重启恢复手册》§3：
@@ -96,10 +97,8 @@ cd ~/screen && nohup python3 app.py 8080 /home/hadoop/screen > ~/gateway.log 2>&
 ## 五、`/hadoop` 页与大屏的关系（你问的）
 
 - `/hadoop` 页是**自建演示工具，不是 hadoop 必需**。当前价值：单独强调"Hadoop 查询/SPark 分析"。
-- 可选融合方向：
-  - **A. 保留独立**：演示时大屏讲业务，切到 /hadoop 讲"大数据引擎"（两种叙事）。
-  - **B. 合并进大屏**：大屏顶部加一个"大数据分析"标签/弹窗，内嵌入 SPark 查询页，整体更统一。
-  - 我倾向**先保留独立**（演示逻辑清晰），有富余再合并。你定。->回答：我觉得可以合在一起。
+- ✅ 已合并：大屏顶部新增「**大数据分析**」按钮 → 弹窗内嵌 SPARK-SQL / Hive 控制台（快捷分析同款 8 维查询，可切引擎）。`/hadoop` 独立页保留不删。
+- 大屏顶部另有「**开发者**」按钮 → `/admin` 开发者模式（导入/手动加数/重建缓存）。
 
 ---
 
@@ -122,7 +121,9 @@ cd ~/screen && nohup python3 app.py 8080 /home/hadoop/screen > ~/gateway.log 2>&
 - [x] 修"未来24h负荷预测"空白（同上 + 读缓存）
 - [x] 浅色主题质感提升（dashboard.css 重写：圆角/阴影/渐变指标卡）
 - [~] 筛选联动：界面可用；实时按筛选重算因 spark 单条启动过慢(~30s)，已回退为"筛选时仍展示全量(秒回不崩)"。**若要真正重算**，需 Spark 会话保活(常驻 pyspark)方案——后续可选优化
-- [ ] 数据导入接口 /admin
+- [x] 数据导入接口 /admin（文件导入 TSV/CSV + 手动填表加数 + 表行数 + 清空 + 一键重建大屏缓存；需 SecureCRT 传新文件后验证）
+- [x] /admin 行数提速：dash_engine 单 Spark 会话顺带算全表行数进 dash_cache（秒回），缓存缺失走 spark 单会话兜底（~30~60s），不再 beeline 串行 30 个 MR（原来七八分钟）
+- [x] hadoop 并入大屏（顶部「大数据分析」弹窗内嵌 SPARK-SQL/Hive 控制台；「开发者」按钮进 /admin；顶栏新增「Hadoop 查询」按钮，/hadoop 页加返回大屏导航）
 - [ ] 造大数据脚本 gen_bigdata.py
 - [ ] ML: 需求热力面板
 - [ ] ML: whatif 推演面板
