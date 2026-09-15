@@ -1,28 +1,128 @@
-<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>充电运营数据大屏</title><link rel="stylesheet" href="css/dashboard.css"></head><body>
-<div class="app-shell"><header class="topbar"><div class="brand"><span class="brand-mark"></span><strong>充电运营数据大屏</strong></div><div class="status-cluster"><button id="mode-toggle" type="button" class="mode-pill"></button><span id="connection-status">未连接</span><span id="last-updated">尚未更新</span><time id="clock"></time><button id="hadoop-button" type="button">Hadoop 查询</button><button id="analysis-button" type="button">大数据分析</button><button id="admin-button" type="button">开发者</button><button id="fullscreen-button" type="button">全屏</button></div></header>
-<main class="page-container"><section id="filter-panel" class="filter-panel"><label>日期<input id="filter-date" type="date"></label><label>区域<select id="filter-region"><option value="">全部区域</option></select></label><label>充电站<select id="filter-station"><option value="">全部电站</option></select></label><button id="filter-submit" type="button">查询</button><button id="filter-reset" type="button">重置</button></section>
-<section id="metric-cards" class="metric-grid"></section>
-<section class="dashboard-grid">
-<article class="panel"><h2>设备状态分布</h2><div id="status-chart" class="chart"></div></article>
-<article class="panel wide"><h2>近 7 天订单趋势</h2><div id="order-trend-chart" class="chart"></div></article>
-<article class="panel wide"><h2>近 7 天充电量与收入</h2><div id="energy-revenue-chart" class="chart"></div></article>
-<article class="panel"><h2>TOP5 充电站</h2><div id="station-rank-chart" class="chart"></div></article>
-<article class="panel wide"><h2>充电站地图</h2><div id="station-map" class="chart"></div></article>
-<article class="panel alarm-panel"><h2>实时告警</h2><div class="alarm-head"><span>时间</span><span>站点 / 设备</span><span>告警内容</span></div><div id="alarm-list" class="alarm-list"></div></article>
-</section>
-<section class="forecast-grid">
-<article class="panel wide"><h2>未来 24 小时充电负荷预测 <span style="color:#557da4;font-size:10px">(PME 机器学习模型)</span></h2><div id="forecast-chart" class="chart"></div></article>
-</section>
-<section class="extra-grid">
-<article class="panel wide"><h2>近 7 天用户增长</h2><div id="user-trend-chart" class="chart"></div></article>
-<article class="panel"><h2>峰谷电量分布</h2><div id="peak-valley-chart" class="chart"></div></article>
-<article class="panel"><h2>绿色充电指数</h2><div id="carbon-chart" class="chart"></div></article>
-<article class="panel event-panel"><h2>实时事件流</h2><div id="event-list" class="alarm-list"></div></article>
-</section></main></div><div id="error-banner" hidden></div>
-<div id="analysis-mask" class="modal-mask" hidden><div class="modal"><div class="modal-head"><strong>大数据分析 · SPARK-SQL 实时计算</strong><span class="modal-close" id="analysis-close">×</span></div><div class="modal-body">
-<div class="quick-chips" id="analysis-chips"></div>
-<textarea id="analysis-sql" spellcheck="false">select count(*) as 总记录数 from chargestation.charging_order;</textarea>
-<div class="modal-toolbar"><button id="analysis-run" type="button">▶ 执行 (SPARK-SQL)</button><button id="analysis-run-hive" type="button" class="ghost">执行 (Hive)</button><span class="muted" id="analysis-state">SPARK-SQL 实时计算，首次约 10~30 秒</span></div>
-<pre id="analysis-out">点击上方快捷分析，或输入 SQL 后点执行。</pre>
-</div></div></div>
-<script src="vendor/echarts.min.js"></script><script src="js/config.js"></script><script src="mock/snapshot.js"></script><script src="js/adapter.js"></script><script src="js/store.js"></script><script src="js/websocket-client.js"></script><script src="js/charts.js"></script><script src="js/components.js"></script><script src="js/app.js"></script><script src="js/analysis.js"></script></body></html>
+<!doctype html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>充电运营数据大屏</title>
+    <link rel="stylesheet" href="css/dashboard.css">
+</head>
+
+<body>
+    <div class="app-shell">
+        <header class="topbar">
+            <div class="brand"><span class="brand-mark"></span><strong>充电运营数据大屏</strong></div>
+            <div class="status-cluster"><button id="mode-toggle" type="button" class="mode-pill"></button><span
+                    id="connection-status">未连接</span><span id="last-updated">尚未更新</span><time id="clock"></time><button
+                    id="hadoop-button" type="button">Hadoop 查询</button><button id="analysis-button"
+                    type="button">大数据分析</button><button id="admin-button" type="button">开发者</button><button
+                    id="fullscreen-button" type="button">全屏</button></div>
+        </header>
+        <main class="page-container">
+            <section id="filter-panel" class="filter-panel"><label>日期<input id="filter-date"
+                        type="date"></label><label>区域<select id="filter-region">
+                        <option value="">全部区域</option>
+                    </select></label><label>充电站<select id="filter-station">
+                        <option value="">全部电站</option>
+                    </select></label><button id="filter-submit" type="button">查询</button><button id="filter-reset"
+                    type="button">重置</button></section>
+            <section id="metric-cards" class="metric-grid"></section>
+            <section class="dashboard-grid">
+                <article class="panel">
+                    <h2>设备状态分布</h2>
+                    <div id="status-chart" class="chart"></div>
+                </article>
+                <article class="panel wide">
+                    <h2>近 7 天订单趋势</h2>
+                    <div id="order-trend-chart" class="chart"></div>
+                </article>
+                <article class="panel wide">
+                    <h2>近 7 天充电量与收入</h2>
+                    <div id="energy-revenue-chart" class="chart"></div>
+                </article>
+                <article class="panel">
+                    <h2>TOP5 充电站</h2>
+                    <div id="station-rank-chart" class="chart"></div>
+                </article>
+                <article class="panel wide">
+                    <h2>充电站地图</h2>
+                    <div id="station-map" class="chart"></div>
+                </article>
+                <article class="panel alarm-panel">
+                    <h2>实时告警</h2>
+                    <div class="alarm-head"><span>时间</span><span>站点 / 设备</span><span>告警内容</span></div>
+                    <div id="alarm-list" class="alarm-list"></div>
+                </article>
+            </section>
+            <section class="forecast-grid">
+                <article class="panel wide">
+                    <h2>未来 24 小时充电负荷预测 <span style="color:#557da4;font-size:10px">(PME 机器学习模型)</span></h2>
+                    <div id="forecast-chart" class="chart"></div>
+                </article>
+            </section>
+            <section class="ml-grid">
+                <article class="panel wide ml-heat">
+                    <h2>需求热力 <span style="color:#557da4;font-size:10px">(DemandForecast · 星期×小时 需求预测)</span></h2>
+                    <div id="demand-heat-chart" class="chart"></div>
+                    <div class="ml-tags" id="demand-surge"></div>
+                </article>
+                <article class="panel ml-health">
+                    <h2>设备健康度 <span style="color:#557da4;font-size:10px">(HealthAssessment)</span></h2>
+                    <div id="health-chart" class="chart"></div>
+                    <div id="health-risk" class="ml-list"></div>
+                </article>
+                <article class="panel ml-whatif">
+                    <h2>What-If 决策推演 <span style="color:#557da4;font-size:10px">(增桩/调价/客流)</span></h2>
+                    <div id="whatif-panel" class="whatif"></div>
+                </article>
+            </section>
+            <section class="extra-grid">
+                <article class="panel wide">
+                    <h2>近 7 天用户增长</h2>
+                    <div id="user-trend-chart" class="chart"></div>
+                </article>
+                <article class="panel">
+                    <h2>峰谷电量分布</h2>
+                    <div id="peak-valley-chart" class="chart"></div>
+                </article>
+                <article class="panel">
+                    <h2>绿色充电指数</h2>
+                    <div id="carbon-chart" class="chart"></div>
+                </article>
+                <article class="panel event-panel">
+                    <h2>实时事件流</h2>
+                    <div id="event-list" class="alarm-list"></div>
+                </article>
+            </section>
+        </main>
+    </div>
+    <div id="error-banner" hidden></div>
+    <div id="analysis-mask" class="modal-mask" hidden>
+        <div class="modal">
+            <div class="modal-head"><strong>大数据分析 · SPARK-SQL 实时计算</strong><span class="modal-close"
+                    id="analysis-close">×</span></div>
+            <div class="modal-body">
+                <div class="quick-chips" id="analysis-chips"></div>
+                <textarea id="analysis-sql"
+                    spellcheck="false">select count(*) as 总记录数 from chargestation.charging_order;</textarea>
+                <div class="modal-toolbar"><button id="analysis-run" type="button">▶ 执行 (SPARK-SQL)</button><button
+                        id="analysis-run-hive" type="button" class="ghost">执行 (Hive)</button><span class="muted"
+                        id="analysis-state">SPARK-SQL 实时计算，首次约 10~30 秒</span></div>
+                <pre id="analysis-out">点击上方快捷分析，或输入 SQL 后点执行。</pre>
+            </div>
+        </div>
+    </div>
+    <script src="vendor/echarts.min.js"></script>
+    <script src="js/config.js"></script>
+    <script src="mock/snapshot.js"></script>
+    <script src="js/adapter.js"></script>
+    <script src="js/store.js"></script>
+    <script src="js/websocket-client.js"></script>
+    <script src="js/charts.js"></script>
+    <script src="js/components.js"></script>
+    <script src="js/app.js"></script>
+    <script src="js/analysis.js"></script>
+    <script src="js/ml.js"></script>
+</body>
+
+</html>

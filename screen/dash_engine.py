@@ -86,6 +86,32 @@ result["station_status"] = rows("select station_id, status as s, count(*) as c f
 result["station_trend"] = rows("select station_id, substr(create_time,1,10) as d, count(*) as c, round(sum(energy_kwh),1) as kwh, round(sum(pay_amount),2) as inc from chargestation.charging_order where substr(create_time,1,10) >= date_format(date_sub(current_date, 30), 'yyyy-MM-dd') group by station_id, substr(create_time,1,10)")
 result["station_peakvalley"] = rows("select station_id, cast(substr(start_time,12,2) as int) as h, round(sum(energy_kwh),1) as kwh from chargestation.charging_order group by station_id, cast(substr(start_time,12,2) as int)")
 
+# ================= 机器学习面板预聚合（需求热力 / 健康度 / WhatIf 基线）=================
+# 每个区段独立 try，单段失败（如字段缺失）不影响整包重建
+# 需求热力：星期(1=周日..7=周六)×小时×区域 有效订单数
+try:
+    result["demand_heat"] = rows("select dayofweek(o.start_time) as dow, cast(substr(o.start_time,12,2) as int) as h, st.area as area, count(*) as c from chargestation.charging_order o join chargestation.station st on o.station_id=st.id where o.status='completed' group by dayofweek(o.start_time), cast(substr(o.start_time,12,2) as int), st.area")
+except Exception:
+    result["demand_heat"] = []
+# 健康度：全桩基础数据（健康分/温度/通信状态）
+try:
+    result["health_charger"] = rows("select st.name as sname, ch.code as code, ch.health_score as h, ch.temperature as t, ch.comm_status as cm from chargestation.charger ch join chargestation.station st on ch.station_id=st.id")
+except Exception:
+    result["health_charger"] = []
+# WhatIf 基线：平均客单价/平均电量/总订单 + 高峰小时 + 排队数 + 桩数
+try:
+    result["ml_agg"] = rows("select round(avg(o.pay_amount),2), round(avg(o.energy_kwh),2), count(*) from chargestation.charging_order o where o.status='completed'")
+except Exception:
+    result["ml_agg"] = []
+try:
+    result["ml_peak"] = rows("select cast(substr(start_time,12,2) as int) as h, count(*) as c from chargestation.charging_order where status='completed' group by cast(substr(start_time,12,2) as int) order by c desc limit 1")
+except Exception:
+    result["ml_peak"] = []
+try:
+    result["ml_queue"] = rows("select count(*) from chargestation.reservation where status='waiting'")
+except Exception:
+    result["ml_queue"] = []
+
 with open(OUT, "w", encoding="utf-8") as f:
     json.dump(result, f, ensure_ascii=False)
 print("DASH_ENGINE_OK", OUT, "region=%s sid=%s date=%s" % (REGION, SID, DATE))

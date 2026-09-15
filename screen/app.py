@@ -611,6 +611,96 @@ def _build_filtered(ce, region, sid, date):
         "filter_options": filter_options,
     }
 
+def build_ml():
+    """从 dash_cache 组装机器学习面板数据（需求热力/健康度/WhatIf 基线），纯内存秒回。"""
+    ce = _read_dash_cache()
+    # ---- 需求热力：星期×小时×区域 需求 + 激增检测 ----
+    heat, agg = [], {}
+    for r in ce.get("demand_heat") or []:
+        try:
+            dow, hour, c = int(r[0]), int(r[1]), int(r[3] or 0)
+        except Exception:
+            continue
+        area = r[2] or ""
+        if dow < 1 or dow > 7 or hour < 0 or hour > 23:
+            continue
+        heat.append({"dow": dow, "hour": hour, "area": area, "demand": c})
+        a = agg.setdefault((hour, area), [0, 0])
+        a[0] += c; a[1] += 1
+    mean = {k: v[0] / max(v[1], 1) for k, v in agg.items()}
+    for item in heat:
+        m = mean.get((item["hour"], item["area"]), 0)
+        delta = (item["demand"] - m) / m if m else 0
+        item["delta"] = round(delta, 2)
+        item["surge"] = delta > 0.5
+    surge = sorted([x for x in heat if x["surge"]], key=lambda x: x["delta"], reverse=True)[:5]
+
+    # ---- 设备健康度：扣分制评分 + 风险等级 + 分布 + 高风险 TOP ----
+    health = {"dist": [0, 0, 0, 0, 0], "risk": []}   # 分布桶:<60,60-70,70-80,80-90,90-100
+    for r in ce.get("health_charger") or []:
+        try:
+            sname, code = r[0] or "", r[1] or ""
+            h = int(r[2] if r[2] not in (None, "") else 100)
+            t = float(r[3] or 0)
+        except Exception:
+            continue
+        cm = (r[4] or "").strip()
+        score = h
+        if t > 50: score -= int(min(2 * (t - 50), 60))
+        if cm == "abnormal": score -= 15
+        score = max(0, min(100, score))
+        risk = (100 - score) / 100.0 * 0.8
+        level = "high" if risk >= 0.6 else ("medium" if risk >= 0.3 else "low")
+        if score < 60: health["dist"][0] += 1
+        elif score < 70: health["dist"][1] += 1
+        elif score < 80: health["dist"][2] += 1
+        elif score < 90: health["dist"][3] += 1
+        else: health["dist"][4] += 1
+        health["risk"].append({"station": sname, "code": code, "health": score, "level": level, "risk": round(risk, 2)})
+    health["risk"].sort(key=lambda x: x["risk"], reverse=True)
+    health["risk"] = health["risk"][:8]
+
+    # ---- WhatIf 基线（前端滑条推演用）----
+    base = {"avg_revenue_per_order": 0.0, "avg_energy_per_order": 0.0, "total_orders": 0,
+            "peak_hour": 0, "peak_demand": 0, "queue": 0, "charger_count": 0,
+            "daily_orders": 0, "daily_revenue": 0.0}
+    m = ce.get("ml_agg")
+    if m and m[0]:
+        try:
+            base["avg_revenue_per_order"] = float(m[0][0] or 0)
+            base["avg_energy_per_order"] = float(m[0][1] or 0)
+            base["total_orders"] = int(m[0][2] or 0)
+        except Exception:
+            pass
+    pk = ce.get("ml_peak")
+    if pk and pk[0]:
+        try:
+            base["peak_hour"] = int(pk[0][0] or 0)
+            base["peak_demand"] = int(pk[0][1] or 0)
+        except Exception:
+            pass
+    q = ce.get("ml_queue")
+    if q and q[0]:
+        try:
+            base["queue"] = int(q[0][0] or 0)
+        except Exception:
+            pass
+    ct = ce.get("charger_total")
+    if ct and ct[0]:
+        try:
+            base["charger_count"] = int(ct[0][0] or 0)
+        except Exception:
+            pass
+    trend = ce.get("trend") or []
+    if trend:
+        days = len(trend)
+        try:
+            base["daily_orders"] = int(round(sum(int(r[1] or 0) for r in trend) / max(days, 1)))
+            base["daily_revenue"] = round(sum(float(r[3] or 0) for r in trend) / max(days, 1), 2)
+        except Exception:
+            pass
+    return {"ok": True, "demand_heat": heat, "top_surge": surge, "health": health, "whatif": base}
+
 def build_snapshot(region="", station_id="", date=""):
     """从 Hive 聚合出大屏需要的完整快照（与 screen.snapshot_resp.payload 同构）。
     优先读取 dash_engine.py 预生成的 dash_cache.json（单次spark会话产物），秒回；缺失再逐条查。
@@ -899,6 +989,13 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 _json_reply(self, {"ok": True, "table": table, "cols": cols})
             except Exception as e:
                 _json_reply(self, {"ok": False, "message": str(e)})
+            return
+        if parsed.path == "/api/ml":
+            try:
+                payload = build_ml()
+            except Exception as e:
+                payload = {"ok": False, "message": str(e)}
+            _json_reply(self, payload)
             return
         if parsed.path == "/hadoop":
             # 用 replace 而非 format，避免 CSS 大括号被误当占位符

@@ -47,15 +47,17 @@ cd ~/screen && nohup python3 app.py 8080 /home/hadoop/screen > ~/gateway.log 2>&
 
 | 引擎 | 上大屏成什么面板 | 优先级 | 数据来源(Hive) |
 |---|---|---|---|
-| PME 负荷预测 | ✅ 已有（需修 Bug） | — | charging_measure |
-| **DemandForecast 需求热力** | 未来时段/区域"需求热力"图（小时×星期×区域聚合，激增预警）| ⭐高 | charging_order |
-| **HealthAssessment 健康度** | 设备健康度分布/高风险桩标识 | 高 | charger.health_score |
+| PME 负荷预测 | ✅ 已有 | — | charging_measure |
+| **DemandForecast 需求热力** | ✅ 已上：星期×小时需求热力图 + 激增预警标签 | ⭐高 ✅ | charging_order |
+| **HealthAssessment 健康度** | ✅ 已上：健康度分布柱状图 + 高风险桩列表（温度/通信扣分制）| 高 ✅ | charger.health_score |
 | **Recommendation 推荐** | 站点评分/相似站（可选） | 中 | station+charger |
-| **WhatIf 推演** | "增 N 桩|降 X 价 → 预计订单/营收"推演面板 | 高(演示很唬人) | charging_order 聚合 |
+| **WhatIf 推演** | ✅ 已上：增桩/调价/客流 滑条 → 日订单/营收/利用率/等待 实时推演（前端算）| 高 ✅ | charging_order 聚合 |
 | ReviewTag 评价分析 | 标签 TOP5 + 五维评分 | 中 | review |
 | WaitTime 等待预估 | 各站未来 N 分钟等待 | 低 | reservation+order |
 
-**建议做成**：一个 `/api/ml` 聚合接口返回多项，大屏增 1~3 个面板（需求热力、健康度、whatif 最出彩）。其余按时间挑。
+**实现方式**：C++ 引擎（Qt 依赖，不能直接上 Web）只作算法参考，按 ML-Algorithm-Docs.md 的白盒公式用 Python/JS 复刻，预聚合进 dash_cache 由 /api/ml 秒回；WhatIf 纯前端算。
+
+**✅ 已落地**：`/api/ml` 聚合接口（热力+健康度+whatif 基线一次返回），大屏新增 3 面板。剩余：Recommendation（可选）、ReviewTag、WaitTime。
 
 ---
 
@@ -125,7 +127,8 @@ cd ~/screen && nohup python3 app.py 8080 /home/hadoop/screen > ~/gateway.log 2>&
 - [x] /admin 行数提速：dash_engine 单 Spark 会话顺带算全表行数进 dash_cache（秒回），缓存缺失走 spark 单会话兜底（~30~60s），不再 beeline 串行 30 个 MR（原来七八分钟）
 - [x] hadoop 并入大屏（顶部「大数据分析」弹窗内嵌 SPARK-SQL/Hive 控制台；「开发者」按钮进 /admin；顶栏新增「Hadoop 查询」按钮，/hadoop 页加返回大屏导航）
 - [ ] 造大数据脚本 gen_bigdata.py
-- [ ] ML: 需求热力面板
-- [ ] ML: whatif 推演面板
+- [x] ML: 需求热力面板（星期×小时热力图 + 激增预警，/api/ml 秒回）
+- [x] ML: whatif 推演面板（滑条实时推演，纯前端算）
+- [x] ML: 健康度面板（分布柱状图 + 高风险桩列表）
 - [ ] 站点下钻 / 地图浮窗
 - [ ] 指标数字滚动动画

@@ -1,30 +1,30 @@
 (function () {
   "use strict";
   const byId = id => document.getElementById(id);
-  const localTime = () => { const d=new Date(),p=n=>String(n).padStart(2,"0"); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`; };
-  let socket=null;
-  const dashboard=new DashboardComponents.MainDashboard(filters => { DataStore.setFilters(filters); if (ScreenConfig.mode === "live") { window.loadHiveData && window.loadHiveData(filters); } });
+  const localTime = () => { const d = new Date(), p = n => String(n).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`; };
+  let socket = null;
+  const dashboard = new DashboardComponents.MainDashboard(filters => { DataStore.setFilters(filters); if (ScreenConfig.mode === "live") { window.loadHiveData && window.loadHiveData(filters); } });
   DataStore.subscribe(state => {
     dashboard.render(state.data);
-    byId("connection-status").textContent={live:"实时连接",connecting:"正在连接",reconnecting:"重新连接",offline:"离线演示"}[state.connection]??"连接异常";
-    byId("last-updated").textContent=state.lastUpdated ? `更新 ${localTime().split(" ")[1]}` : "尚未更新";
-    byId("error-banner").hidden=!state.error;
-    byId("error-banner").textContent=state.error??"";
+    byId("connection-status").textContent = { live: "实时连接", connecting: "正在连接", reconnecting: "重新连接", offline: "离线演示" }[state.connection] ?? "连接异常";
+    byId("last-updated").textContent = state.lastUpdated ? `更新 ${localTime().split(" ")[1]}` : "尚未更新";
+    byId("error-banner").hidden = !state.error;
+    byId("error-banner").textContent = state.error ?? "";
   });
-  byId("clock").textContent=localTime();
-  setInterval(() => byId("clock").textContent=localTime(),1000);
-  byId("fullscreen-button").onclick=() => document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
+  byId("clock").textContent = localTime();
+  setInterval(() => byId("clock").textContent = localTime(), 1000);
+  byId("fullscreen-button").onclick = () => document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
   // 模式开关：实时 / 演示（记忆选择，切回主界面不丢）
-  const modePill=byId("mode-toggle");
-  const refreshModePill=() => {
-    const live=ScreenConfig.mode==="live";
-    modePill.textContent=live?"● 实时数据":"○ 演示数据";
-    modePill.classList.toggle("live",live);
+  const modePill = byId("mode-toggle");
+  const refreshModePill = () => {
+    const live = ScreenConfig.mode === "live";
+    modePill.textContent = live ? "● 实时数据" : "○ 演示数据";
+    modePill.classList.toggle("live", live);
   };
-  modePill.onclick=() => {
-    const next=ScreenConfig.mode==="live"?"mock":"live";
-    try{localStorage.setItem("screen_mode",next);}catch(e){}
-    location.href="/index.html?mode="+next;
+  modePill.onclick = () => {
+    const next = ScreenConfig.mode === "live" ? "mock" : "live";
+    try { localStorage.setItem("screen_mode", next); } catch (e) { }
+    location.href = "/index.html?mode=" + next;
   };
   refreshModePill();
   if (ScreenConfig.mode === "live") {
@@ -44,7 +44,9 @@
     window.loadHiveData = loadHiveData;
     loadHiveData();
     // 机器学习：未来24h负荷预测（PME）
-    fetch("/api/forecast").then(r => r.json()).then(fc => { if (fc && !fc.error && window.ScreenCharts) window.ScreenCharts.forecast(fc); }).catch(()=>{});
+    fetch("/api/forecast").then(r => r.json()).then(fc => {
+      if (fc && !fc.error && window.ScreenCharts) window.ScreenCharts.forecast(fc);
+    }).catch(() => { });
   }
   else DataStore.setSnapshot(ScreenMockSnapshot);
 }());
