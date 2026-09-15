@@ -439,6 +439,178 @@ def build_forecast():
     fc["model"] = "PME 周期性移动平均外推"
     return fc
 
+def _build_filtered(ce, region, sid, date):
+    """从 dash_cache 的区域/站点预聚合区段组装筛选快照（纯内存，秒回，零 spark）。
+    区域/站点/日期可任意组合；返回结构与全量快照一致。"""
+    st_rows = ce.get("stations") or []
+    st_ch = {}   # station_id -> [count, online]
+    st_od = {}   # station_id -> [orders, energy, revenue]
+    for r in ce.get("station_charger") or []:
+        try:
+            st_ch[str(r[0])] = [int(r[1] or 0), int(r[2] or 0)]
+        except Exception:
+            continue
+    for r in ce.get("station_order") or []:
+        try:
+            st_od[str(r[0])] = [int(r[1] or 0), float(r[2] or 0), float(r[3] or 0)]
+        except Exception:
+            continue
+    # 站点作用域（区域/站点筛选）
+    scope = []
+    for r in st_rows:
+        if region and (r[2] or "") != region:
+            continue
+        if sid and str(r[0]) != str(sid):
+            continue
+        scope.append(r)
+    scope_ids = {str(r[0]) for r in scope}
+    st_map = {str(r[0]): r[1] for r in scope}
+
+    # 1) 指标卡
+    station_count = len(scope)
+    charger_count = sum(st_ch.get(str(r[0]), [0, 0])[0] for r in scope)
+    online_charger_count = sum(st_ch.get(str(r[0]), [0, 0])[1] for r in scope)
+    if date:
+        today_orders = today_energy = today_revenue = 0
+        for r in ce.get("station_trend") or []:
+            if str(r[0]) not in scope_ids:
+                continue
+            if (r[1] or "") != date:
+                continue
+            today_orders += int(r[2] or 0)
+            today_energy += float(r[3] or 0)
+            today_revenue += float(r[4] or 0)
+        today_energy = round(today_energy, 1)
+        today_revenue = round(today_revenue, 2)
+    else:
+        today_orders = sum(st_od.get(str(r[0]), [0, 0, 0])[0] for r in scope)
+        today_energy = round(sum(st_od.get(str(r[0]), [0, 0, 0])[1] for r in scope), 1)
+        today_revenue = round(sum(st_od.get(str(r[0]), [0, 0, 0])[2] for r in scope), 2)
+
+    # 2) 设备状态分布
+    sd = {"idle": 0, "charging": 0, "offline": 0, "fault": 0}
+    for r in ce.get("station_status") or []:
+        if str(r[0]) not in scope_ids:
+            continue
+        s, n = (r[1] or "").strip(), int(r[2] or 0)
+        if s == "idle": sd["idle"] += n
+        elif s == "offline": sd["offline"] += n
+        elif s == "fault": sd["fault"] += n
+        else: sd["charging"] += n
+
+    # 3) 趋势（scope 内按日期聚合；选了日期则只显示该日期）
+    trend_map = {}
+    for r in ce.get("station_trend") or []:
+        if str(r[0]) not in scope_ids:
+            continue
+        d = r[1] or ""
+        if not d:
+            continue
+        if date and d != date:
+            continue
+        t = trend_map.setdefault(d, [0, 0.0, 0.0])
+        t[0] += int(r[2] or 0); t[1] += float(r[3] or 0); t[2] += float(r[4] or 0)
+    order_trend, energy_revenue_trend = [], []
+    for d in sorted(trend_map):
+        t = trend_map[d]
+        order_trend.append({"date": d, "order_count": t[0]})
+        energy_revenue_trend.append({"date": d, "energy_kwh": round(t[1], 1), "revenue": round(t[2], 2)})
+    order_trend = order_trend[-7:]
+    energy_revenue_trend = energy_revenue_trend[-7:]
+
+    # 4) 站点排行（scope 内按订单数 TOP5）
+    rank_items = []
+    for r in scope:
+        o = st_od.get(str(r[0]), [0, 0, 0])
+        rank_items.append({"station_id": r[0], "station_name": r[1], "today_orders": o[0], "today_energy_kwh": o[1]})
+    rank_items.sort(key=lambda x: x["today_orders"], reverse=True)
+    station_rank = rank_items[:5]
+
+    # 5) 地图站点
+    stations = []
+    for r in scope:
+        try:
+            lon, lat = float(r[3] or 0), float(r[4] or 0)
+        except Exception:
+            lon = lat = 0
+        stations.append({"id": r[0], "name": r[1], "region": r[2] or "", "longitude": lon, "latitude": lat, "status": "normal", "status_text": "正常运行"})
+
+    # 6) 告警 / 事件（按 scope 站点过滤，日期可选）
+    alarms = []
+    for r in ce.get("alarms") or []:
+        if str(r[1]) not in scope_ids:
+            continue
+        if date and not (r[3] or "").startswith(date):
+            continue
+        alarms.append({"id": r[0], "occur_time": r[3], "station_id": r[1], "station_name": "", "charger_id": None, "charger_code": "", "content": f"告警等级 {r[2]}", "level": r[2] if r[2] in ("info", "warning", "critical") else "warning"})
+    events = []
+    for r in ce.get("events") or []:
+        if str(r[3]) not in scope_ids:
+            continue
+        if date and not (r[1] or "").startswith(date):
+            continue
+        uid = r[2]
+        st = st_map.get(str(r[3]), "某站")
+        events.append({"id": f"evt-o{r[0]}", "occur_time": r[1], "type": "order", "content": f"用户{uid} 在 {st} 完成充电"})
+    for r in alarms:
+        events.append({"id": f"evt-a{r['id']}", "occur_time": r["occur_time"], "type": "alarm", "content": f"站点发生{r['content']}告警"})
+    events = events[:10]
+
+    # 7) 峰谷电量
+    pv = {"day": today_energy, "valley": 0.0, "flat": 0.0, "peak": 0.0}
+    for r in ce.get("station_peakvalley") or []:
+        if str(r[0]) not in scope_ids:
+            continue
+        try:
+            hh, e = int(r[1]), float(r[2] or 0)
+        except Exception:
+            continue
+        if 0 <= hh < 8: pv["valley"] += e
+        elif 17 <= hh < 21: pv["peak"] += e
+        else: pv["flat"] += e
+
+    # 8) 碳排（沿用全局公式）
+    FACTOR = 0.7
+    today_reduce = round(today_energy * FACTOR / 1000.0, 2)
+    total_reduce = round(today_energy * FACTOR / 1000.0, 2)
+    valley_ratio = (pv["valley"] / pv["day"]) if pv["day"] else 0
+    green_index = round(min(100, 60 + valley_ratio * 40), 1)
+    carbon = {"today_energy_kwh": today_energy, "today_reduce_tons": today_reduce, "total_energy_kwh": today_energy, "total_reduce_tons": total_reduce, "green_index": green_index}
+
+    # 9) 用户增长（平台级，保持全局）
+    user_trend = [{"date": r[0], "user_count": int(r[1] or 0)} for r in (ce.get("user_trend") or [])]
+
+    # 10) 筛选项（全局候选，便于切换）
+    regions, st_opt = [], []
+    reg_set = set()
+    for r in ce.get("stations") or []:
+        st_opt.append({"id": r[0], "name": r[1]})
+        if len(r) > 2 and r[2]:
+            reg_set.add(r[2])
+    filter_options = {"regions": sorted(reg_set), "stations": st_opt}
+
+    return {
+        "metrics": {
+            "station_count": station_count,
+            "charger_count": charger_count,
+            "online_charger_count": online_charger_count,
+            "today_energy_kwh": today_energy,
+            "today_orders": today_orders,
+            "today_revenue": today_revenue,
+        },
+        "status_distribution": sd,
+        "order_trend": order_trend,
+        "energy_revenue_trend": energy_revenue_trend,
+        "station_rank": station_rank,
+        "stations": stations,
+        "alarms": alarms,
+        "events": events,
+        "user_trend": user_trend,
+        "peak_valley": pv,
+        "carbon": carbon,
+        "filter_options": filter_options,
+    }
+
 def build_snapshot(region="", station_id="", date=""):
     """从 Hive 聚合出大屏需要的完整快照（与 screen.snapshot_resp.payload 同构）。
     优先读取 dash_engine.py 预生成的 dash_cache.json（单次spark会话产物），秒回；缺失再逐条查。
@@ -472,6 +644,9 @@ def build_snapshot(region="", station_id="", date=""):
         _CE = {}
     import sys as _sys
     _sys.stderr.write(f"[dash] cache_keys={list(_CE.keys())[:6]} use_filter={bool(region or station_id or date)}\n")
+    # 筛选：若缓存含站点维度预聚合区段（dash_engine 新版产物），走内存组装，秒回
+    if use_filter and _CE.get("station_order"):
+        return _build_filtered(_CE, region, station_id, date)
     def _rc(key, i, default=""):
         """从缓存取第i行第0~col列"""
         try:

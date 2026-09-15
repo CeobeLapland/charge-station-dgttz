@@ -67,6 +67,25 @@ try:
 except Exception:
     result["table_counts"] = []
 
+# ================= 筛选预聚合（区域/站点维度，供 /api/snapshot 筛选秒回）=================
+# 设计：把"区域/站点维度"的统计在重建时一次性算好（GROUP BY 行，量小），
+#       网关收到筛选参数只做内存行选择+聚合，不再逐条起 spark。
+# 注意：charger/order 与 station 是 1:1 join（无放大），可安全 join；避免 order×charger 多对多放大。
+
+# 区域维度
+result["region_charger"] = rows("select st.area as area, count(*) as cnt, sum(case when ch.status in ('idle','charging') then 1 else 0 end) as online from chargestation.charger ch join chargestation.station st on ch.station_id=st.id group by st.area")
+result["region_order"] = rows("select st.area as area, count(*) as cnt, round(sum(o.energy_kwh),1) as kwh, round(sum(o.pay_amount),2) as inc from chargestation.charging_order o join chargestation.station st on o.station_id=st.id group by st.area")
+result["region_status"] = rows("select st.area as area, ch.status as s, count(*) as c from chargestation.charger ch join chargestation.station st on ch.station_id=st.id group by st.area, ch.status")
+result["region_trend"] = rows("select st.area as area, substr(o.create_time,1,10) as d, count(*) as c, round(sum(o.energy_kwh),1) as kwh, round(sum(o.pay_amount),2) as inc from chargestation.charging_order o join chargestation.station st on o.station_id=st.id where substr(o.create_time,1,10) >= date_format(date_sub(current_date, 30), 'yyyy-MM-dd') group by st.area, substr(o.create_time,1,10)")
+result["region_peakvalley"] = rows("select st.area as area, cast(substr(o.start_time,12,2) as int) as h, round(sum(o.energy_kwh),1) as kwh from chargestation.charging_order o join chargestation.station st on o.station_id=st.id group by st.area, cast(substr(o.start_time,12,2) as int)")
+
+# 站点维度（单表 group by，无 join）
+result["station_charger"] = rows("select station_id, count(*) as cnt, sum(case when status in ('idle','charging') then 1 else 0 end) as online from chargestation.charger group by station_id")
+result["station_order"] = rows("select station_id, count(*) as cnt, round(sum(energy_kwh),1) as kwh, round(sum(pay_amount),2) as inc from chargestation.charging_order group by station_id")
+result["station_status"] = rows("select station_id, status as s, count(*) as c from chargestation.charger group by station_id, status")
+result["station_trend"] = rows("select station_id, substr(create_time,1,10) as d, count(*) as c, round(sum(energy_kwh),1) as kwh, round(sum(pay_amount),2) as inc from chargestation.charging_order where substr(create_time,1,10) >= date_format(date_sub(current_date, 30), 'yyyy-MM-dd') group by station_id, substr(create_time,1,10)")
+result["station_peakvalley"] = rows("select station_id, cast(substr(start_time,12,2) as int) as h, round(sum(energy_kwh),1) as kwh from chargestation.charging_order group by station_id, cast(substr(start_time,12,2) as int)")
+
 with open(OUT, "w", encoding="utf-8") as f:
     json.dump(result, f, ensure_ascii=False)
 print("DASH_ENGINE_OK", OUT, "region=%s sid=%s date=%s" % (REGION, SID, DATE))

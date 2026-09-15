@@ -39,7 +39,7 @@ cd ~/screen && nohup python3 app.py 8080 /home/hadoop/screen > ~/gateway.log 2>&
 
 ## 一、有待处理的 Bug / 已知限制
 - ✅ 历史大屏 Bug 已全修复（卡顿、空白图）。
-- ⚠️ 筛选联动：界面可用、秒回不崩，但**暂按全量展示**（未真正按所选范围重算）。原因：spark 单条启动过慢。若要做真筛选，需 Spark 常驻会话(保活 pyspark)方案。
+- ✅ 筛选联动已做真联动（预聚合进 dash_cache，秒回，见 §七）。
 
 ## 二、机器学习扩充（面子工程，可逐个加）
 
@@ -66,7 +66,7 @@ cd ~/screen && nohup python3 app.py 8080 /home/hadoop/screen > ~/gateway.log 2>&
 | 数字滚动动画 | 指标卡数字滚动 | 中 |
 | 站点下钻 | 点击地图站点 → 看该站明细（桩、负荷、订单）| 中 |
 | 实时功率滚动 | 全网功率实时曲线滚动（秒级）| 中 |
-| 筛选联动 | 日期/区域/站点筛选 → 大屏全部模块联动刷新（目前筛选只是摆设）| 高 |
+| 筛选联动 | 日期/区域/站点筛选 → 大屏全部模块联动刷新（✅ 已做：预聚合进 dash_cache，秒回）| 高 ✅ |
 | 告警/事件 置顶高亮 | 新告警闪烁 | 低 |
 | forecast 置信区间开关 | 预测/实际曲线 Toggle | 低 |
 
@@ -120,7 +120,7 @@ cd ~/screen && nohup python3 app.py 8080 /home/hadoop/screen > ~/gateway.log 2>&
 - [x] 修"近7天电量收入"空白（energyRevenue 分两次 setOption 双Y轴崩溃 → 单次 setOption）
 - [x] 修"未来24h负荷预测"空白（同上 + 读缓存）
 - [x] 浅色主题质感提升（dashboard.css 重写：圆角/阴影/渐变指标卡）
-- [~] 筛选联动：界面可用；实时按筛选重算因 spark 单条启动过慢(~30s)，已回退为"筛选时仍展示全量(秒回不崩)"。**若要真正重算**，需 Spark 会话保活(常驻 pyspark)方案——后续可选优化
+- [x] 筛选联动：真联动秒回。方案：dash_engine 重建缓存时预聚合「区域维度+站点维度」统计（GROUP BY 一次算好进 dash_cache），网关 /api/snapshot 收到筛选参数只做内存行选择+聚合，零 spark、秒回；日期筛选在已加载的趋势行中过滤。需重传 dash_engine.py/app.py 并重建缓存后生效
 - [x] 数据导入接口 /admin（文件导入 TSV/CSV + 手动填表加数 + 表行数 + 清空 + 一键重建大屏缓存；需 SecureCRT 传新文件后验证）
 - [x] /admin 行数提速：dash_engine 单 Spark 会话顺带算全表行数进 dash_cache（秒回），缓存缺失走 spark 单会话兜底（~30~60s），不再 beeline 串行 30 个 MR（原来七八分钟）
 - [x] hadoop 并入大屏（顶部「大数据分析」弹窗内嵌 SPARK-SQL/Hive 控制台；「开发者」按钮进 /admin；顶栏新增「Hadoop 查询」按钮，/hadoop 页加返回大屏导航）

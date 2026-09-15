@@ -14,6 +14,19 @@
   byId("clock").textContent=localTime();
   setInterval(() => byId("clock").textContent=localTime(),1000);
   byId("fullscreen-button").onclick=() => document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
+  // 模式开关：实时 / 演示（记忆选择，切回主界面不丢）
+  const modePill=byId("mode-toggle");
+  const refreshModePill=() => {
+    const live=ScreenConfig.mode==="live";
+    modePill.textContent=live?"● 实时数据":"○ 演示数据";
+    modePill.classList.toggle("live",live);
+  };
+  modePill.onclick=() => {
+    const next=ScreenConfig.mode==="live"?"mock":"live";
+    try{localStorage.setItem("screen_mode",next);}catch(e){}
+    location.href="/index.html?mode="+next;
+  };
+  refreshModePill();
   if (ScreenConfig.mode === "live") {
     // 从网关 /api/snapshot 拉 Hive 聚合数据（WebSocket 服务端未运行，改用 HTTP），支持筛选
     const loadHiveData = (filters) => {
