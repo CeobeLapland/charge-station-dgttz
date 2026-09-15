@@ -52,12 +52,16 @@ cd ~/screen && nohup python3 app.py 8080 /home/hadoop/screen > ~/gateway.log 2>&
 | **HealthAssessment 健康度** | ✅ 已上：健康度分布柱状图 + 高风险桩列表（温度/通信扣分制）| 高 ✅ | charger.health_score |
 | **Recommendation 推荐** | 站点评分/相似站（可选） | 中 | station+charger |
 | **WhatIf 推演** | ✅ 已上：增桩/调价/客流 滑条 → 日订单/营收/利用率/等待 实时推演（前端算）| 高 ✅ | charging_order 聚合 |
-| ReviewTag 评价分析 | 标签 TOP5 + 五维评分 | 中 | review |
+| ReviewTag 评价分析 | ✅ 已上：五维评分雷达图 + 高频标签 TOP5 条形 | 中 ✅ | review |
+| **Dispatch 调度建议** | ✅ 已上：空闲率/排队/高峰利用率 规则引擎 → 调度动作卡片（A1-A4）| 中 ✅ | status+reservation+peak |
+| **充电效率分析** | ✅ 已上：快充 vs 慢充 平均时长柱状图（tooltip 含电量/订单量）| 中 ✅ | charging_order+charger |
+| **AI 运营助手** | ✅ 已上：4 条模板问答卡片（营收/最忙站/故障/高峰），数据实时 | 中 ✅ | 多表聚合 |
+| **近7日负荷走势** | ✅ 已上：股票分时风格，7 天 24h 曲线叠加 + 今日高亮线 + 7 日均线虚线 | 中 ✅ | charging_measure |
 | WaitTime 等待预估 | 各站未来 N 分钟等待 | 低 | reservation+order |
 
 **实现方式**：C++ 引擎（Qt 依赖，不能直接上 Web）只作算法参考，按 ML-Algorithm-Docs.md 的白盒公式用 Python/JS 复刻，预聚合进 dash_cache 由 /api/ml 秒回；WhatIf 纯前端算。
 
-**✅ 已落地**：`/api/ml` 聚合接口（热力+健康度+whatif 基线一次返回），大屏新增 3 面板。剩余：Recommendation（可选）、ReviewTag、WaitTime。
+**✅ 已落地**：`/api/ml` 聚合接口一次返回热力+健康度+whatif+评价分析+调度建议+充电效率+运营助手+近7日负荷走势，大屏共 8 个 ML 面板。剩余：Recommendation（可选）、WaitTime。
 
 ---
 
@@ -130,5 +134,7 @@ cd ~/screen && nohup python3 app.py 8080 /home/hadoop/screen > ~/gateway.log 2>&
 - [x] ML: 需求热力面板（星期×小时热力图 + 激增预警，/api/ml 秒回）
 - [x] ML: whatif 推演面板（滑条实时推演，纯前端算）
 - [x] ML: 健康度面板（分布柱状图 + 高风险桩列表）
+- [x] ML: 评价标签分析面板（五维雷达图 + TOP5 标签条形，review 表 JSON 标签 Python 侧解析）
+- [x] ML: 智能调度建议面板（空闲率/排队/高峰利用率 规则 → A1-A4 动作卡片，纯前端算）
 - [ ] 站点下钻 / 地图浮窗
 - [ ] 指标数字滚动动画

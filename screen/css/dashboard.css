@@ -789,3 +789,149 @@ select {
     color: var(--muted);
     line-height: 1.5
 }
+
+/* ===== 评价标签分析 + 智能调度建议 ===== */
+.ml-review {
+    height: 320px
+}
+
+.review-wrap {
+    display: flex;
+    gap: 16px;
+    height: 100%
+}
+
+.review-radar {
+    flex: 0 0 46%;
+    height: 250px
+}
+
+.review-side {
+    flex: 1;
+    min-width: 0;
+    padding-top: 4px
+}
+
+.review-tags {
+    display: grid;
+    gap: 6px
+}
+
+.rtag {
+    display: grid;
+    grid-template-columns: 74px minmax(0, 1fr) 30px;
+    gap: 8px;
+    align-items: center;
+    font-size: 11px
+}
+
+.rtag-name {
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis
+}
+
+.rtag-bar {
+    height: 8px;
+    border-radius: 4px;
+    background: #edf1f5;
+    overflow: hidden
+}
+
+.rtag-fill {
+    height: 100%;
+    border-radius: 4px;
+    background: linear-gradient(90deg, var(--blue2), var(--blue))
+}
+
+.rtag-count {
+    color: var(--text);
+    text-align: right;
+    font-variant-numeric: tabular-nums
+}
+
+.ml-dispatch {
+    height: 320px
+}
+
+.dispatch {
+    display: grid;
+    gap: 8px;
+    padding-top: 2px
+}
+
+.dispatch-card {
+    border: 1px solid var(--border);
+    border-left-width: 3px;
+    border-radius: 8px;
+    padding: 9px 11px;
+    background: #fafbfd;
+    display: flex;
+    flex-direction: column;
+    gap: 3px
+}
+
+.dispatch-card strong {
+    font-size: 12px;
+    color: #31405a
+}
+
+.dispatch-card span {
+    font-size: 11px;
+    color: var(--muted);
+    line-height: 1.45
+}
+
+.dispatch-card.warn {
+    border-left-color: #d99a4e
+}
+
+.dispatch-card.info {
+    border-left-color: var(--blue)
+}
+
+.dispatch-card.ok {
+    border-left-color: var(--green)
+}
+
+/* ===== 充电效率分析 + AI 运营助手 ===== */
+.ml-eff {
+    height: 320px
+}
+
+.ml-eff .chart {
+    height: 250px
+}
+
+.ml-ai {
+    height: 320px
+}
+
+.assistant {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+    padding-top: 4px
+}
+
+.qa-card {
+    background: #f7f9fc;
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    padding: 11px 13px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px
+}
+
+.qa-card strong {
+    font-size: 12px;
+    color: var(--blue)
+}
+
+.qa-card span {
+    font-size: 11px;
+    color: var(--text);
+    line-height: 1.5
+}

@@ -699,7 +699,92 @@ def build_ml():
             base["daily_revenue"] = round(sum(float(r[3] or 0) for r in trend) / max(days, 1), 2)
         except Exception:
             pass
-    return {"ok": True, "demand_heat": heat, "top_surge": surge, "health": health, "whatif": base}
+
+    # ---- 评价分析（ReviewTag）：五维均分 + 标签 TOP5 ----
+    review = {"scores": [0.0, 0.0, 0.0, 0.0, 0.0], "count": 0, "tags": []}
+    rs = ce.get("review_stats")
+    if rs and rs[0]:
+        try:
+            review["scores"] = [float(rs[0][i] or 0) for i in range(5)]
+            review["count"] = int(rs[0][5] or 0)
+        except Exception:
+            pass
+    tag_cnt = {}
+    for r in ce.get("review_tags") or []:
+        try:
+            tags = json.loads(r[0] or "[]")
+        except Exception:
+            tags = []
+        for t in (tags if isinstance(tags, list) else []):
+            t = str(t).strip()
+            if t:
+                tag_cnt[t] = tag_cnt.get(t, 0) + 1
+    review["tags"] = [{"tag": t, "count": c} for t, c in sorted(tag_cnt.items(), key=lambda x: x[1], reverse=True)[:5]]
+
+    # ---- 调度建议基线（Dispatch）：空闲率 / 排队 / 高峰利用率 ----
+    sd = {"idle": 0, "charging": 0, "offline": 0, "fault": 0}
+    for r in ce.get("status") or []:
+        s, n = (r[0] or "").strip(), int(r[1] or 0)
+        if s == "idle": sd["idle"] = n
+        elif s == "offline": sd["offline"] = n
+        elif s == "fault": sd["fault"] = n
+        else: sd["charging"] += n
+    ct = ce.get("charger_total")
+    total_c = int(ct[0][0] or 0) if ct and ct[0] else 0
+    dispatch = {
+        "idle_rate": round(sd["idle"] / max(total_c, 1), 3),
+        "queue": base["queue"],
+        "peak_util": round(base["peak_demand"] / max(total_c, 1), 3),
+        "peak_hour": base["peak_hour"],
+    }
+
+    # ---- 充电效率分析（快充/慢充 时长与电量）----
+    eff = []
+    for r in ce.get("ml_charge_eff") or []:
+        try:
+            eff.append({"name": ("快充" if (r[0] or "").strip() == "fast" else ("慢充" if (r[0] or "").strip() == "slow" else (r[0] or "").strip())),
+                        "count": int(r[1] or 0), "avg_duration": float(r[2] or 0), "avg_energy": float(r[3] or 0)})
+        except Exception:
+            continue
+
+    # ---- AI 运营助手（模板问答，数据全来自缓存）----
+    rank = ce.get("rank") or []
+    busiest = {"name": rank[0][1] if rank and len(rank[0]) > 1 else "—", "orders": int(rank[0][2] or 0) if rank and len(rank[0]) > 2 else 0}
+    trend = ce.get("trend") or []
+    today_revenue = float(trend[-1][3] or 0) if trend and len(trend[-1]) > 3 else 0.0
+    today_orders = int(trend[-1][1] or 0) if trend and len(trend[-1]) > 1 else 0
+    ut = ce.get("ml_user_total")
+    total_users = int(ut[0][0] or 0) if ut and ut[0] else 0
+    assistant = {
+        "today_revenue": round(today_revenue, 2),
+        "today_orders": today_orders,
+        "busiest_station": busiest["name"],
+        "busiest_orders": busiest["orders"],
+        "fault_count": sd["fault"],
+        "total_users": total_users,
+        "peak_hour": base["peak_hour"],
+        "peak_demand": base["peak_demand"],
+    }
+
+    # ---- 近 7 日负荷走势（股票分时风格：每天一条 24h 曲线 + 7 日均线）----
+    load_map = {}
+    for r in ce.get("load_trend") or []:
+        try:
+            d, h, p = r[0], int(r[1]), float(r[2] or 0)
+        except Exception:
+            continue
+        if d and 0 <= h <= 23:
+            load_map.setdefault(d, [0.0] * 24)[h] = p
+    if load_map:
+        load_dates = sorted(load_map.keys())
+        avg = []
+        for h in range(24):
+            vals = [load_map[d][h] for d in load_dates]
+            avg.append(round(sum(vals) / len(vals), 1))
+        load_trend = {"dates": load_dates, "lines": load_map, "avg": avg}
+    else:
+        load_trend = {"dates": [], "lines": {}, "avg": []}
+    return {"ok": True, "demand_heat": heat, "top_surge": surge, "health": health, "whatif": base, "review": review, "dispatch": dispatch, "eff": eff, "assistant": assistant, "load_trend": load_trend}
 
 def build_snapshot(region="", station_id="", date=""):
     """从 Hive 聚合出大屏需要的完整快照（与 screen.snapshot_resp.payload 同构）。

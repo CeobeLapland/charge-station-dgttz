@@ -59,6 +59,10 @@
                     <h2>未来 24 小时充电负荷预测 <span style="color:#557da4;font-size:10px">(PME 机器学习模型)</span></h2>
                     <div id="forecast-chart" class="chart"></div>
                 </article>
+                <article class="panel wide ml-trend">
+                    <h2>近 7 日负荷走势 <span style="color:#557da4;font-size:10px">(分时叠加 · 多线对比)</span></h2>
+                    <div id="load-trend-chart" class="chart"></div>
+                </article>
             </section>
             <section class="ml-grid">
                 <article class="panel wide ml-heat">
@@ -74,6 +78,32 @@
                 <article class="panel ml-whatif">
                     <h2>What-If 决策推演 <span style="color:#557da4;font-size:10px">(增桩/调价/客流)</span></h2>
                     <div id="whatif-panel" class="whatif"></div>
+                </article>
+            </section>
+            <section class="ml-grid">
+                <article class="panel wide ml-review">
+                    <h2>评价标签分析 <span style="color:#557da4;font-size:10px">(ReviewTag · 五维评分 + 高频标签)</span></h2>
+                    <div class="review-wrap">
+                        <div id="review-radar" class="review-radar"></div>
+                        <div class="review-side">
+                            <div id="review-tags" class="review-tags"></div>
+                            <div class="muted" id="review-count" style="font-size:10px;margin-top:6px"></div>
+                        </div>
+                    </div>
+                </article>
+                <article class="panel ml-dispatch">
+                    <h2>智能调度建议 <span style="color:#557da4;font-size:10px">(Dispatch · 规则引擎)</span></h2>
+                    <div id="dispatch-panel" class="dispatch"></div>
+                </article>
+            </section>
+            <section class="ml-grid">
+                <article class="panel ml-eff">
+                    <h2>充电效率分析 <span style="color:#557da4;font-size:10px">(快充 vs 慢充)</span></h2>
+                    <div id="eff-chart" class="chart"></div>
+                </article>
+                <article class="panel wide ml-ai">
+                    <h2>AI 运营助手 <span style="color:#557da4;font-size:10px">(模板问答 · 实时数据)</span></h2>
+                    <div id="assistant-panel" class="assistant"></div>
                 </article>
             </section>
             <section class="extra-grid">

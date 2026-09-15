@@ -111,6 +111,31 @@ try:
     result["ml_queue"] = rows("select count(*) from chargestation.reservation where status='waiting'")
 except Exception:
     result["ml_queue"] = []
+# 评价分析：五维均分 + 评价数
+try:
+    result["review_stats"] = rows("select round(avg(speed_score),2), round(avg(device_score),2), round(avg(parking_score),2), round(avg(hygiene_score),2), round(avg(service_score),2), count(*) from chargestation.review")
+except Exception:
+    result["review_stats"] = []
+# 评价分析：标签原始 JSON 行（Python 侧解析统计 TOP5）
+try:
+    result["review_tags"] = rows("select tags from chargestation.review where tags is not null and tags != '' and tags != '[]'")
+except Exception:
+    result["review_tags"] = []
+# 充电效率：快充/慢充 订单量 + 平均时长 + 平均电量（order-charper 1:1 join）
+try:
+    result["ml_charge_eff"] = rows("select ch.type as t, count(*) as cnt, round(avg(o.duration_min),1) as dur, round(avg(o.energy_kwh),1) as kwh from chargestation.charging_order o left join chargestation.charger ch on o.charger_id=ch.id where o.status='completed' group by ch.type")
+except Exception:
+    result["ml_charge_eff"] = []
+# 用户总量（AI 运营助手问答用）
+try:
+    result["ml_user_total"] = rows("select count(*) from chargestation.user")
+except Exception:
+    result["ml_user_total"] = []
+# 近 7 日负荷走势（股票分时风格：每天一条 24h 曲线）
+try:
+    result["load_trend"] = rows("select substr(m.measure_time,1,10) as d, cast(substr(m.measure_time,12,2) as int) as h, round(sum(m.power_kw),1) as p from chargestation.charging_measure m where substr(m.measure_time,1,10) >= date_format(date_sub(current_date, 7), 'yyyy-MM-dd') group by substr(m.measure_time,1,10), cast(substr(m.measure_time,12,2) as int)")
+except Exception:
+    result["load_trend"] = []
 
 with open(OUT, "w", encoding="utf-8") as f:
     json.dump(result, f, ensure_ascii=False)
